@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Audiobookshelf Wear</string>
+    <string name="title_activity_player">Now Playing</string>
+</resources>

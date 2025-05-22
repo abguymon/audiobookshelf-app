@@ -1078,7 +1078,8 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                   ANDROID_AUTO_SIMULATOR_PKG_NAME,
                   ANDROID_WEARABLE_PKG_NAME,
                   ANDROID_GSEARCH_PKG_NAME,
-                  ANDROID_AUTOMOTIVE_PKG_NAME
+                ANDROID_AUTOMOTIVE_PKG_NAME,
+                "com.audiobookshelf.app.wear" // Added Wear OS app package name
           )
 
   private val AUTO_MEDIA_ROOT = "/"
