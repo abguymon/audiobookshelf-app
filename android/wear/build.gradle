@@ -49,5 +49,10 @@ dependencies {
     implementation "androidx.appcompat:appcompat:1.6.1"
     implementation "androidx.constraintlayout:constraintlayout:2.1.4"
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.5.1"
+
+    // ExoPlayer for local playback
+    implementation "com.google.android.exoplayer:exoplayer-core:2.18.7" // Core module
+    implementation "com.google.android.exoplayer:exoplayer-ui:2.18.7"   // UI module (optional, but can be useful)
+
     // Removed androidx.activity:activity-compose as it's not needed for WearableActivity
 }

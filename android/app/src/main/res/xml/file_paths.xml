@@ -1,4 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<paths>
-  <files-path name="downloads" path="downloads/" />
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- For files in context.getFilesDir()/downloads/ -->
+    <files-path name="downloads" path="downloads/" />
+
+    <!-- For files in context.getFilesDir()/ (app's internal root files directory) -->
+    <files-path name="internal_files" path="." />
+
+    <!-- For files in context.getCacheDir()/ (app's internal cache directory) -->
+    <cache-path name="internal_cache" path="." />
+
+    <!-- For files in context.getExternalFilesDir(null)/ (app's root on external storage) -->
+    <external-files-path name="external_app_files" path="." />
+
+    <!-- For files in context.getExternalCacheDir()/ (app's cache on external storage) -->
+    <external-cache-path name="external_app_cache" path="." />
+
+    <!-- If you store files directly in Environment.getExternalStorageDirectory() (not recommended for Android Q+)
+         you might need <external-path name="external_storage_root" path="." />
+         However, this requires careful handling of permissions and scoped storage.
+         For now, focusing on app-specific directories.
+    -->
 </paths>

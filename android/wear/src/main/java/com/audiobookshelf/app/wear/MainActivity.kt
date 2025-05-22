@@ -25,6 +25,7 @@ private const val TAG = "WearMainActivity"
 private val PLAYER_SERVICE_COMPONENT_NAME =
     ComponentName("com.audiobookshelf.app", "com.audiobookshelf.app.player.PlayerNotificationService")
 private const val ROOT_MEDIA_ID = "/"
+private const val DOWNLOADS_MEDIA_ID = "__DOWNLOADS_MEDIA_ID__" // Special ID for Downloads
 
 class MainActivity : WearableActivity() {
 
@@ -32,6 +33,7 @@ class MainActivity : WearableActivity() {
     private var mediaController: MediaControllerCompat? = null
     private lateinit var mediaListView: WearableRecyclerView
     private lateinit var mediaItemAdapter: MediaItemAdapter
+    private val db by lazy { (application as WearApplication).database } // Access database
 
     private val connectionCallbacks = object : MediaBrowserCompat.ConnectionCallback() {
         override fun onConnected() {
@@ -66,12 +68,30 @@ class MainActivity : WearableActivity() {
     private val subscriptionCallback = object : MediaBrowserCompat.SubscriptionCallback() {
         override fun onChildrenLoaded(parentId: String, children: MutableList<MediaBrowserCompat.MediaItem>) {
             Log.d(TAG, "onChildrenLoaded for parentId: $parentId, children count: ${children.size}")
-            if (children.isEmpty()) {
+            val allItems = mutableListOf<MediaBrowserCompat.MediaItem>()
+
+            // Add "My Downloads" item only if viewing the root
+            if (parentId == ROOT_MEDIA_ID) {
+                val downloadsItemDescription = MediaBrowserCompat.MediaDescriptionCompat.Builder()
+                    .setMediaId(DOWNLOADS_MEDIA_ID)
+                    .setTitle("My Downloads")
+                    // Optionally, add an icon: .setIconUri(Uri.parse("android.resource://your.package.name/" + R.drawable.ic_download))
+                    .build()
+                val downloadsMediaItem = MediaBrowserCompat.MediaItem(
+                    downloadsItemDescription,
+                    MediaBrowserCompat.MediaItem.FLAG_BROWSABLE // Treat as browsable to make it clickable
+                )
+                allItems.add(downloadsMediaItem)
+            }
+
+            if (children.isEmpty() && parentId != ROOT_MEDIA_ID) { // Only return if not root and children empty
                 Log.d(TAG, "No children found for $parentId")
-                // TODO: Handle empty list, maybe show a message
+                // TODO: Handle empty list for non-root, maybe show a message
+                mediaItemAdapter.setMediaItems(allItems) // Show "My Downloads" if it was added
                 return
             }
-            mediaItemAdapter.setMediaItems(children)
+            allItems.addAll(children)
+            mediaItemAdapter.setMediaItems(allItems)
         }
 
         override fun onError(parentId: String) {
@@ -98,10 +118,10 @@ class MainActivity : WearableActivity() {
         setAmbientEnabled() // Enable ambient mode
 
         mediaListView = findViewById(R.id.media_list_view)
-        mediaListView.isEdgeItemsCenteringEnabled = true // Recommended for Wear OS lists
-        // mediaListView.layoutManager = WearableLinearLayoutManager(this) // Already set in XML for WearableRecyclerView
+        mediaListView.isEdgeItemsCenteringEnabled = true
 
-        mediaItemAdapter = MediaItemAdapter(emptyList()) { mediaItem ->
+        // Pass the DAO to the adapter
+        mediaItemAdapter = MediaItemAdapter(emptyList(), db.downloadedItemDao()) { mediaItem ->
             onMediaItemSelected(mediaItem)
         }
         mediaListView.adapter = mediaItemAdapter
@@ -143,7 +163,11 @@ class MainActivity : WearableActivity() {
 
     private fun onMediaItemSelected(mediaItem: MediaBrowserCompat.MediaItem) {
         Log.d(TAG, "Media item selected: ${mediaItem.description.title}, ID: ${mediaItem.mediaId}")
-        if (mediaItem.isBrowsable) {
+
+        if (mediaItem.mediaId == DOWNLOADS_MEDIA_ID) {
+            Log.d(TAG, "Downloads item selected, launching DownloadsActivity")
+            startActivity(Intent(this, DownloadsActivity::class.java))
+        } else if (mediaItem.isBrowsable) {
             Log.d(TAG, "Item is BROWSABLE, subscribing to ${mediaItem.mediaId}")
             mediaBrowser.subscribe(mediaItem.mediaId!!, subscriptionCallback)
         } else if (mediaItem.isPlayable) {
@@ -164,12 +188,14 @@ class MainActivity : WearableActivity() {
 
 class MediaItemAdapter(
     private var mediaItems: List<MediaBrowserCompat.MediaItem>,
+    private val downloadedItemDao: com.audiobookshelf.app.wear.db.DownloadedItemDao, // DAO instance
     private val itemClickListener: (MediaBrowserCompat.MediaItem) -> Unit
 ) : RecyclerView.Adapter<MediaItemAdapter.ViewHolder>() {
 
     class ViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val titleTextView: TextView = view.findViewById(R.id.media_item_title)
-        val iconImageView: ImageView = view.findViewById(R.id.media_item_icon) // Assuming you have an icon
+        val iconImageView: ImageView = view.findViewById(R.id.media_item_icon)
+        val downloadIndicatorImageView: ImageView = view.findViewById(R.id.media_item_download_indicator) // Added
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -181,9 +207,24 @@ class MediaItemAdapter(
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val mediaItem = mediaItems[position]
         holder.titleTextView.text = mediaItem.description.title ?: "Unknown Title"
-        // TODO: Load icon using mediaItem.description.iconUri or a placeholder
-        // For now, we can set a placeholder or leave it as is if the XML has a default src
-        // holder.iconImageView.setImageURI(mediaItem.description.iconUri)
+
+        // TODO: Load actual icon using mediaItem.description.iconUri or a placeholder
+        // Glide.with(holder.iconImageView.context).load(mediaItem.description.iconUri).into(holder.iconImageView)
+
+        if (mediaItem.mediaId == DOWNLOADS_MEDIA_ID) { // Do not show indicator for "My Downloads"
+            holder.downloadIndicatorImageView.visibility = View.GONE
+        } else {
+            // Check download status
+            // This is a blocking call on the UI thread. If performance issues arise,
+            // this needs to be done asynchronously (e.g., CoroutineScope in Adapter or ViewModel).
+            val downloadedItem = mediaItem.mediaId?.let { downloadedItemDao.getByIdBlocking(it) }
+            if (downloadedItem != null && downloadedItem.isDownloadComplete()) {
+                holder.downloadIndicatorImageView.visibility = View.VISIBLE
+            } else {
+                holder.downloadIndicatorImageView.visibility = View.GONE
+            }
+        }
+
         holder.itemView.setOnClickListener {
             itemClickListener(mediaItem)
         }

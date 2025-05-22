@@ -13,9 +13,12 @@ import com.audiobookshelf.app.player.PlayerNotificationService
 import com.audiobookshelf.app.server.ApiHandler
 import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import android.app.AlertDialog
+import com.audiobookshelf.app.wearable.WatchDownloadHandler
 import com.getcapacitor.*
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.google.android.gms.cast.CastDevice
+import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import org.json.JSONObject
@@ -27,6 +30,7 @@ class AbsAudioPlayer : Plugin() {
 
   private lateinit var mainActivity: MainActivity
   private lateinit var apiHandler:ApiHandler
+  private var watchDownloadHandler: WatchDownloadHandler? = null // Added
   var castManager:CastManager? = null
 
   lateinit var playerNotificationService: PlayerNotificationService
@@ -36,6 +40,7 @@ class AbsAudioPlayer : Plugin() {
   override fun load() {
     mainActivity = (activity as MainActivity)
     apiHandler = ApiHandler(mainActivity)
+    watchDownloadHandler = WatchDownloadHandler(mainActivity.applicationContext) // Added
 
     try {
       initCastManager()
@@ -422,5 +427,53 @@ class AbsAudioPlayer : Plugin() {
     val jsobj = JSObject()
     jsobj.put("value", isCastAvailable)
     call.resolve(jsobj)
+  }
+
+  @PluginMethod
+  fun initiateDownloadToWatch(call: PluginCall) {
+    val mediaItemId = call.getString("mediaItemId")
+    if (mediaItemId.isNullOrEmpty()) {
+      call.reject("Missing mediaItemId")
+      return
+    }
+
+    val activity = this.activity ?: run {
+      call.reject("Activity not available")
+      return
+    }
+
+    val nodeClient = Wearable.getNodeClient(activity)
+    nodeClient.connectedNodes.addOnSuccessListener { nodes ->
+      if (nodes.isEmpty()) {
+        Handler(Looper.getMainLooper()).post {
+          android.widget.Toast.makeText(activity, "No Wear OS device connected.", android.widget.Toast.LENGTH_LONG).show()
+        }
+        call.reject("No Wear OS device connected")
+        return@addOnSuccessListener
+      }
+
+      // For simplicity, using mediaItemId in dialog. Ideally, fetch title.
+      Handler(Looper.getMainLooper()).post {
+        AlertDialog.Builder(activity)
+          .setTitle("Download to Watch")
+          .setMessage("Download item '$mediaItemId' to your watch?")
+          .setPositiveButton("Download") { dialog, _ ->
+            watchDownloadHandler?.handleDownloadRequestFromUI(mediaItemId)
+            call.resolve(JSObject().put("message", "Download initiated for $mediaItemId"))
+            dialog.dismiss()
+          }
+          .setNegativeButton("Cancel") { dialog, _ ->
+            call.resolve(JSObject().put("message", "Download cancelled for $mediaItemId"))
+            dialog.dismiss()
+          }
+          .show()
+      }
+    }.addOnFailureListener { exception ->
+      Log.e(tag, "Failed to get connected Wear OS nodes", exception)
+      Handler(Looper.getMainLooper()).post {
+        android.widget.Toast.makeText(activity, "Error checking for Wear OS devices.", android.widget.Toast.LENGTH_LONG).show()
+      }
+      call.reject("Failed to check connected nodes: ${exception.message}")
+    }
   }
 }
