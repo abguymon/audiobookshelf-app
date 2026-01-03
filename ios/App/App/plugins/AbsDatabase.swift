@@ -33,6 +33,8 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "setCurrentServerConnectionConfig", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "removeServerConnectionConfig", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getRefreshToken", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearRefreshToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "logout", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getDeviceData", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getLocalLibraryItems", returnType: CAPPluginReturnPromise),
@@ -47,15 +49,26 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "updateDeviceSettings", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateLocalEbookProgress", returnType: CAPPluginReturnPromise)
     ]
-    
-    private let logger = AppLogger(category: "AbsDatabase")
+
+    private let secureStorage = SecureStorage()
+
+    // Used to notify the webview frontend that the token has been refreshed
+    static var tokenRefreshCallback: ((String, [String: Any]) -> Void)?
+
+    override public func load() {
+        AbsDatabase.tokenRefreshCallback = { [weak self] eventName, data in
+            self?.notifyListeners(eventName, data: data)
+        }
+    }
 
     @objc func setCurrentServerConnectionConfig(_ call: CAPPluginCall) {
         var id = call.getString("id")
         let address = call.getString("address", "")
+        let version = call.getString("version", "")
         let userId = call.getString("userId", "")
         let username = call.getString("username", "")
         let token = call.getString("token", "")
+        let refreshToken = call.getString("refreshToken", "") // Refresh only sent after login or refresh
 
         let name = "\(address) (\(username))"
 
@@ -63,11 +76,18 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
             id = "\(address)@\(username)".toBase64()
         }
 
+        if (refreshToken != "") {
+            // Store refresh token securely if provided
+            let hasRefreshToken = secureStorage.storeRefreshToken(serverConnectionConfigId: id ?? "", refreshToken: refreshToken)
+            AbsLogger.info(message: "Refresh token secured = \(hasRefreshToken)")
+        }
+
         let config = ServerConnectionConfig()
         config.id = id ?? ""
         config.index = 0
         config.name = name
         config.address = address
+        config.version = version
         config.userId = userId
         config.username = username
         config.token = token
@@ -76,12 +96,35 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
         let savedConfig = Store.serverConfig // Fetch the latest value
         call.resolve(convertServerConnectionConfigToJSON(config: savedConfig!))
     }
+
     @objc func removeServerConnectionConfig(_ call: CAPPluginCall) {
         let id = call.getString("serverConnectionConfigId", "")
-        Database.shared.deleteServerConnectionConfig(id: id)
 
+        // Remove refresh token if it exists
+        _ = secureStorage.removeRefreshToken(serverConnectionConfigId: id)
+
+        Database.shared.deleteServerConnectionConfig(id: id)
         call.resolve()
     }
+
+    @objc func getRefreshToken(_ call: CAPPluginCall) {
+        let serverConnectionConfigId = call.getString("serverConnectionConfigId", "")
+
+        let refreshToken = secureStorage.getRefreshToken(serverConnectionConfigId: serverConnectionConfigId)
+        if let refreshToken = refreshToken {
+            call.resolve(["refreshToken": refreshToken])
+        } else {
+            call.resolve()
+        }
+    }
+
+    @objc func clearRefreshToken(_ call: CAPPluginCall) {
+        let serverConnectionConfigId = call.getString("serverConnectionConfigId", "")
+
+        let success = secureStorage.removeRefreshToken(serverConnectionConfigId: serverConnectionConfigId)
+        call.resolve(["success": success])
+    }
+
     @objc func logout(_ call: CAPPluginCall) {
         Store.serverConfig = nil
         call.resolve()
@@ -104,15 +147,16 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
             let items = Database.shared.getLocalLibraryItems()
             call.resolve([ "value": try items.asDictionaryArray()])
         } catch(let exception) {
-            logger.error("error while readling local library items")
+            AbsLogger.error(message: "error reading local library items \(exception)")
             debugPrint(exception)
             call.resolve()
         }
     }
 
     @objc func getLocalLibraryItem(_ call: CAPPluginCall) {
+        let id = call.getString("id") ?? ""
         do {
-            let item = Database.shared.getLocalLibraryItem(localLibraryItemId: call.getString("id") ?? "")
+            let item = Database.shared.getLocalLibraryItem(localLibraryItemId: id)
             switch item {
                 case .some(let foundItem):
                     call.resolve(try foundItem.asDictionary())
@@ -120,7 +164,7 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
                     call.resolve()
             }
         } catch(let exception) {
-            logger.error("error while readling local library items")
+            AbsLogger.error(message: "error reading local library item[\(id)] \(exception)")
             debugPrint(exception)
             call.resolve()
         }
@@ -136,8 +180,7 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
                     call.resolve()
             }
         } catch(let exception) {
-            logger.error("error while readling local library items")
-            debugPrint(exception)
+            AbsLogger.error(message: "error while readling local library items: \(exception)", error: exception)
             call.resolve()
         }
     }
@@ -150,8 +193,7 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
         do {
             call.resolve([ "value": try Database.shared.getAllLocalMediaProgress().asDictionaryArray() ])
         } catch {
-            logger.error("Error while loading local media progress")
-            debugPrint(error)
+            AbsLogger.error(message: "Error while loading local media progress", error: error)
             call.resolve(["value": []])
         }
     }
@@ -168,7 +210,7 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
 
     @objc func syncLocalSessionsWithServer(_ call: CAPPluginCall) {
         let isFirstSync = call.getBool("isFirstSync", false)
-        logger.log("syncLocalSessionsWithServer: Starting (First sync: \(isFirstSync))")
+        AbsLogger.info(message: "Starting syncLocalSessionsWithServer isFirstSync=\(isFirstSync)")
         guard Store.serverConfig != nil else {
             call.reject("syncLocalSessionsWithServer not connected to server")
             return call.resolve()
@@ -200,12 +242,13 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
                 return
             }
 
-            logger.log("syncServerMediaProgressWithLocalMediaProgress: Saving local media progress")
+            AbsLogger.info(message: "Saving local media progress \(serverMediaProgress)")
             try localMediaProgress.updateFromServerMediaProgress(serverMediaProgress)
 
             call.resolve(try localMediaProgress.asDictionary())
         } catch {
             call.reject("Failed to sync media progress")
+            AbsLogger.error(message: "Failed to sync: \(error)")
             debugPrint(error)
         }
     }
@@ -220,7 +263,7 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
             localMediaProgressId += "-\(localEpisodeId ?? "")"
         }
 
-        logger.log("updateLocalMediaProgressFinished \(localMediaProgressId) | Is Finished: \(isFinished)")
+        AbsLogger.info(message: "\(localMediaProgressId): isFinished=\(isFinished)")
 
         do {
             let localMediaProgress = try LocalMediaProgress.fetchOrCreateLocalMediaProgress(localMediaProgressId: localMediaProgressId, localLibraryItemId: localLibraryItemId, localEpisodeId: localEpisodeId)
@@ -293,7 +336,7 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
         let ebookLocation = call.getString("ebookLocation", "")
         let ebookProgress = call.getDouble("ebookProgress", 0.0)
 
-        logger.log("updateLocalEbookProgress \(localLibraryItemId ?? "Unknown") | ebookLocation: \(ebookLocation) | ebookProgress: \(ebookProgress)")
+        AbsLogger.info(message: "\(localLibraryItemId ?? "Unknown"): ebookLocation=\(ebookLocation) ebookProgress=\(ebookProgress)")
 
         do {
             let localMediaProgress = try LocalMediaProgress.fetchOrCreateLocalMediaProgress(localMediaProgressId: localLibraryItemId, localLibraryItemId: localLibraryItemId, localEpisodeId: nil)
