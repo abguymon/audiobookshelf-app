@@ -11,11 +11,11 @@
 
       <div class="w-full overflow-y-auto">
         <template v-for="item in navItems">
-          <button v-if="item.action" :key="item.text" :tabindex="show ? 0 : -1" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg-muted" @click="clickAction(item.action)">
+          <button v-if="item.action" :key="item.text" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg-muted" @click="clickAction(item.action)">
             <span class="material-symbols fill text-lg">{{ item.icon }}</span>
             <p class="pl-4">{{ item.text }}</p>
           </button>
-          <nuxt-link v-else :to="item.to" :key="item.text" :tabindex="show ? 0 : -1" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg" :class="currentRoutePath.startsWith(item.to) ? 'bg-bg-hover/50' : 'text-fg-muted'">
+          <nuxt-link v-else :to="item.to" :key="item.text" class="w-full hover:bg-bg/60 flex items-center py-3 px-6 text-fg" :class="currentRoutePath.startsWith(item.to) ? 'bg-bg-hover/50' : 'text-fg-muted'">
             <span class="material-symbols fill text-lg">{{ item.icon }}</span>
             <p class="pl-4">{{ item.text }}</p>
           </nuxt-link>
@@ -134,12 +134,14 @@ export default {
         to: '/settings'
       })
 
-      items.push({
-        icon: 'bug_report',
-        iconOutlined: true,
-        text: this.$strings.ButtonLogs,
-        to: '/logs'
-      })
+      if (this.$platform !== 'ios') {
+        items.push({
+          icon: 'bug_report',
+          iconOutlined: true,
+          text: this.$strings.ButtonLogs,
+          to: '/logs'
+        })
+      }
 
       if (this.serverConnectionConfig) {
         items.push({
@@ -177,24 +179,31 @@ export default {
       this.show = false
     },
     async logout() {
-      await this.$store.dispatch('user/logout')
+      if (this.user) {
+        if (this.$store.getters['getIsPlayerOpen']) {
+          this.$eventBus.$emit('close-stream')
+        }
+
+        await this.$nativeHttp.post('/logout').catch((error) => {
+          console.error('Failed to logout', error)
+        })
+      }
+
+      this.$socket.logout()
+      await this.$db.logout()
+      this.$localStore.removeLastLibraryId()
+      this.$store.commit('user/logout')
+      this.$store.commit('libraries/setCurrentLibrary', null)
     },
     async disconnect() {
       await this.$hapticsImpact()
       await this.logout()
 
-      // Redirect to home page
       if (this.$route.name !== 'bookshelf') {
         this.$router.replace('/bookshelf')
+      } else {
+        location.reload()
       }
-
-      // If player is open and not playing locally, then close the player
-      if (this.$store.getters['getIsPlayerOpen']) {
-        this.$eventBus.$emit('close-stream')
-      }
-
-      // Close side drawer
-      this.show = false
     },
     touchstart(e) {
       this.touchEvent = new TouchEvent(e)

@@ -4,26 +4,18 @@
       <!-- list of server connection configs -->
       <template v-if="!showForm">
         <div v-for="config in serverConnectionConfigs" :key="config.id" class="border-b border-fg/10 py-4">
-          <div class="flex items-center my-1 relative space-x-2" @click="connectToServer(config)">
-            <div class="grow inline-flex items-center overflow-hidden">
-              <p class="text-base text-fg truncate">{{ config.name }}</p>
-            </div>
-            <div class="h-full w-6 flex items-center" @click.stop="editServerConfig(config)">
+          <div class="flex items-center my-1 relative" @click="connectToServer(config)">
+            <span class="material-symbols text-xl text-fg-muted">dns</span>
+            <p class="pl-3 pr-6 text-base text-fg">{{ config.name }}</p>
+
+            <div class="absolute top-0 right-0 h-full px-4 flex items-center" @click.stop="editServerConfig(config)">
               <span class="material-symbols text-2xl text-fg-muted">more_vert</span>
-            </div>
-            <div class="h-full w-6 flex items-center" @click.stop="removeServerConfigClick(config)">
-              <span class="material-symbols fill text-1.5xl text-fg-muted">delete</span>
             </div>
           </div>
           <!-- warning message if server connection config is using an old user id -->
           <div v-if="!checkIdUuid(config.userId)" class="flex flex-nowrap justify-between items-center space-x-4 pt-4">
             <p class="text-xs text-warning">{{ $strings.MessageOldServerConnectionWarning }}</p>
             <ui-btn class="text-xs whitespace-nowrap" :padding-x="2" :padding-y="1" @click="showOldUserIdWarningDialog">{{ $strings.LabelMoreInfo }}</ui-btn>
-          </div>
-          <!-- warning message if server connection config is using an old auth method -->
-          <div v-if="config.version && checkIsUsingOldAuth(config)" class="flex flex-nowrap justify-between items-center space-x-4 pt-4">
-            <p class="text-xs text-warning">{{ $strings.MessageOldServerAuthWarning }}</p>
-            <ui-btn class="text-xs whitespace-nowrap" :padding-x="2" :padding-y="1" @click="showOldAuthWarningDialog">{{ $strings.LabelMoreInfo }}</ui-btn>
           </div>
         </div>
         <div class="my-1 py-4 w-full">
@@ -33,7 +25,7 @@
       <!-- form to add a new server connection config -->
       <div v-else class="w-full">
         <!-- server address input -->
-        <form v-if="!showAuth" @submit.prevent="submit(false)" novalidate class="w-full">
+        <form v-if="!showAuth" @submit.prevent="submit" novalidate class="w-full">
           <div v-if="serverConnectionConfigs.length" class="flex items-center mb-4" @click="showServerList">
             <span class="material-symbols text-fg-muted">arrow_back</span>
           </div>
@@ -60,7 +52,7 @@
             <ui-text-input v-model="password" type="password" :disabled="processing" :placeholder="$strings.LabelPassword" class="w-full mb-2 text-lg" />
 
             <div class="flex items-center pt-2">
-              <ui-icon-btn v-if="serverConfig.id" bg-color="error" icon="delete" type="button" @click="removeServerConfigClick(serverConfig)" />
+              <ui-icon-btn v-if="serverConfig.id" small bg-color="error" icon="delete" type="button" @click="removeServerConfigClick" />
               <div class="flex-grow" />
               <ui-btn :disabled="processing || !networkConnected" type="submit" class="mt-1 h-10">{{ networkConnected ? $strings.ButtonSubmit : $strings.MessageNoNetworkConnection }}</ui-btn>
             </div>
@@ -79,6 +71,9 @@
 
     <div :class="processing ? 'opacity-100' : 'opacity-0 pointer-events-none'" class="fixed w-full h-full top-0 left-0 bg-black/75 flex items-center justify-center z-30 transition-opacity duration-500">
       <div>
+        <div class="absolute top-0 left-0 w-full p-6 flex items-center flex-col justify-center z-0 short:hidden">
+          <img src="/Logo.png" class="h-20 w-20 mb-2" />
+        </div>
         <svg class="animate-spin w-16 h-16" viewBox="0 0 24 24">
           <path fill="currentColor" d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z" />
         </svg>
@@ -160,22 +155,8 @@ export default {
         cancelText: this.$strings.ButtonOk
       })
     },
-    async showOldAuthWarningDialog() {
-      const confirmResult = await Dialog.confirm({
-        title: 'Old Server Auth Warning',
-        message: this.$strings.MessageOldServerAuthWarningHelp,
-        cancelButtonTitle: this.$strings.ButtonReadMore
-      })
-      if (!confirmResult.value) {
-        window.open('https://github.com/advplyr/audiobookshelf/discussions/4460', '_blank')
-      }
-    },
     checkIdUuid(userId) {
       return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)
-    },
-    checkIsUsingOldAuth(config) {
-      if (!config.version) return true
-      return !this.$isValidVersion(config.version, '2.26.0')
     },
     /**
      * Initiates the login process using OpenID via OAuth2.0.
@@ -393,34 +374,24 @@ export default {
       } catch (error) {} // No Error handling needed
 
       try {
-        // Returns the same user response payload as /login
         const response = await CapacitorHttp.get({
           url: backendEndpoint
         })
-        // v2.26.0+ returns accessToken and refreshToken on user object
-        if (!response.data?.user?.token && !response.data?.user?.accessToken) {
-          throw new Error('Token is missing in response.')
+
+        if (!response.data || !response.data.user || !response.data.user.token) {
+          throw new Error('Token data is missing in the response.')
         }
 
-        const user = response.data.user
-        this.serverConfig.token = user.accessToken || user.token
-
-        // TODO: Is it necessary to authenticate again?
+        this.serverConfig.token = response.data.user.token
         const payload = await this.authenticateToken()
 
         if (!payload) {
           throw new Error('Authentication failed with the provided token.')
         }
 
-        const duplicateConfig = this.serverConnectionConfigs.find((scc) => scc.address === this.serverConfig.address && scc.username === payload.user.username && scc.id !== this.serverConfig.id)
+        const duplicateConfig = this.serverConnectionConfigs.find((scc) => scc.address === this.serverConfig.address && scc.username === payload.user.username)
         if (duplicateConfig) {
           throw new Error('Config already exists for this address and username.')
-        }
-
-        // For v2.26.0+ re-attach accessToken and refreshToken to user object because /authorize does not return them
-        if (user.accessToken) {
-          payload.user.accessToken = user.accessToken
-          payload.user.refreshToken = user.refreshToken
         }
 
         this.setUserAndConnection(payload)
@@ -465,21 +436,16 @@ export default {
       }
 
       this.error = null
-      const payload = await this.authenticateToken()
+      var payload = await this.authenticateToken()
 
       if (payload) {
-        // Will NOT include access token and refresh token
         this.setUserAndConnection(payload)
       } else {
-        let error = this.error
-        if (await this.submit(true)) {
-          this.showForm = true
-          this.error = error
-        }
+        this.showAuth = true
       }
     },
-    async removeServerConfigClick(serverConfig) {
-      if (!serverConfig.id) return
+    async removeServerConfigClick() {
+      if (!this.serverConfig.id) return
       await this.$hapticsImpact()
 
       const { value } = await Dialog.confirm({
@@ -488,9 +454,9 @@ export default {
       })
       if (value) {
         this.processing = true
-        await this.$db.removeServerConnectionConfig(serverConfig.id)
+        await this.$db.removeServerConnectionConfig(this.serverConfig.id)
         const updatedDeviceData = { ...this.deviceData }
-        updatedDeviceData.serverConnectionConfigs = this.deviceData.serverConnectionConfigs.filter((scc) => scc.id != serverConfig.id)
+        updatedDeviceData.serverConnectionConfigs = this.deviceData.serverConnectionConfigs.filter((scc) => scc.id != this.serverConfig.id)
         this.$store.commit('setDeviceData', updatedDeviceData)
 
         this.serverConfig = {
@@ -502,17 +468,14 @@ export default {
         this.processing = false
         this.showAuth = false
         this.showForm = !this.serverConnectionConfigs.length
-        this.error = null
       }
     },
-    async editServerConfig(serverConfig) {
+    editServerConfig(serverConfig) {
       this.serverConfig = {
         ...serverConfig
       }
-
-      if (await this.submit(true)) {
-        this.showForm = true
-      }
+      this.showForm = true
+      this.showAuth = true
     },
     async newServerConfigClick() {
       await this.$hapticsImpact()
@@ -541,7 +504,7 @@ export default {
       try {
         var urlObject = new URL(url)
         if (protocolOverride) urlObject.protocol = protocolOverride
-        return urlObject.href.replace(/\/$/, '') // Remove trailing slash
+        return urlObject.href
       } catch (error) {
         console.error('Invalid URL', error)
         return null
@@ -634,12 +597,7 @@ export default {
         })
     },
     requestServerLogin() {
-      const headers = {
-        // Tells the Abs server to return the refresh token
-        'x-return-tokens': 'true',
-        ...(this.serverConfig.customHeaders || {})
-      }
-      return this.postRequest(`${this.serverConfig.address}/login`, { username: this.serverConfig.username, password: this.password || '' }, headers, 20000)
+      return this.postRequest(`${this.serverConfig.address}/login`, { username: this.serverConfig.username, password: this.password || '' }, this.serverConfig.customHeaders, 20000)
         .then((data) => {
           if (!data.user) {
             console.error(data.error)
@@ -658,8 +616,9 @@ export default {
           return false
         })
     },
-    async submit(preventAutoLogin = false) {
-      if (!this.networkConnected || !this.serverConfig.address) return false
+    async submit() {
+      if (!this.networkConnected) return
+      if (!this.serverConfig.address) return
 
       const initialAddress = this.serverConfig.address
       // Did the user specify a protocol?
@@ -672,7 +631,6 @@ export default {
       this.authMethods = []
 
       try {
-        console.log('[ServerConnectForm] submit tryServerUrl: ' + this.serverConfig.address)
         // Try the server URL. If it fails and the protocol was not provided, try with http instead of https
         const statusData = await this.tryServerUrl(this.serverConfig.address, !protocolProvided)
         if (this.validateLoginFormResponse(statusData, this.serverConfig.address, protocolProvided)) {
@@ -681,17 +639,12 @@ export default {
           this.oauth.buttonText = statusData.data.authFormData?.authOpenIDButtonText || 'Login with OpenID'
           this.serverConfig.version = statusData.data.serverVersion
 
-          if (statusData.data.authFormData?.authOpenIDAutoLaunch && !preventAutoLogin) {
+          if (statusData.data.authFormData?.authOpenIDAutoLaunch) {
             this.clickLoginWithOpenId()
           }
-          return true
-        } else {
-          console.log('[ServerConnectForm] submit validateLoginFormResponse failed: ' + this.serverConfig.address)
-          return false
         }
       } catch (error) {
         this.handleLoginFormError(error)
-        return false
       } finally {
         this.processing = false
       }
@@ -817,6 +770,26 @@ export default {
     prependProtocolIfNeeded(address) {
       return address.startsWith('http://') || address.startsWith('https://') ? address : `https://${address}`
     },
+    /**
+     * Compares two semantic versioning strings to determine if the current version meets
+     * or exceeds the minimum version requirement.
+     *
+     * @param {string} currentVersion - The current version string to compare, e.g., "1.2.3".
+     * @param {string} minVersion - The minimum version string required, e.g., "1.0.0".
+     * @returns {boolean} - Returns true if the current version is greater than or equal
+     *                      to the minimum version, false otherwise.
+     */
+    isValidVersion(currentVersion, minVersion) {
+      const currentParts = currentVersion.split('.').map(Number)
+      const minParts = minVersion.split('.').map(Number)
+
+      for (let i = 0; i < minParts.length; i++) {
+        if (currentParts[i] > minParts[i]) return true
+        if (currentParts[i] < minParts[i]) return false
+      }
+
+      return true
+    },
     async submitAuth() {
       if (!this.networkConnected) return
       if (!this.serverConfig.username) {
@@ -833,10 +806,9 @@ export default {
       this.error = null
       this.processing = true
 
-      const payload = await this.requestServerLogin()
+      var payload = await this.requestServerLogin()
       this.processing = false
       if (payload) {
-        // Will include access token and refresh token
         this.setUserAndConnection(payload)
       }
     },
@@ -849,30 +821,18 @@ export default {
       this.$store.commit('libraries/setEReaderDevices', ereaderDevices)
       this.$setServerLanguageCode(serverSettings.language)
 
-      this.serverConfig.userId = user.id
-      this.serverConfig.username = user.username
-
-      if (this.$isValidVersion(serverSettings.version, '2.26.0')) {
-        // Tokens only returned from /login endpoint
-        if (user.accessToken) {
-          this.serverConfig.token = user.accessToken
-          this.serverConfig.refreshToken = user.refreshToken
-        } else {
-          // Detect if the connection config is using the old token. If so, force re-login
-          if (this.serverConfig.token === user.token || user.isOldToken) {
-            this.setForceRelogin('oldAuthToken')
-            return
-          }
-
-          // If the token was updated during a refresh (in nativeHttp.js) it gets updated in the store, so refetch
-          this.serverConfig.token = this.$store.getters['user/getToken'] || this.serverConfig.token
-        }
-      } else {
-        // Server version before new JWT auth, use old user.token
-        this.serverConfig.token = user.token
+      // Set library - Use last library if set and available fallback to default user library
+      var lastLibraryId = await this.$localStore.getLastLibraryId()
+      if (lastLibraryId && (!user.librariesAccessible.length || user.librariesAccessible.includes(lastLibraryId))) {
+        this.$store.commit('libraries/setCurrentLibrary', lastLibraryId)
+      } else if (userDefaultLibraryId) {
+        this.$store.commit('libraries/setCurrentLibrary', userDefaultLibraryId)
       }
 
-      this.serverConfig.version = serverSettings.version
+      this.serverConfig.userId = user.id
+      this.serverConfig.token = user.token
+      this.serverConfig.username = user.username
+      delete this.serverConfig.version
 
       var serverConnectionConfig = await this.$db.setServerConnectionConfig(this.serverConfig)
 
@@ -889,16 +849,7 @@ export default {
         }
       }
 
-      // Set library - Use last library if set and available fallback to default user library
-      const lastLibraryId = await this.$localStore.getLastLibraryId()
-      if (lastLibraryId && (!user.librariesAccessible.length || user.librariesAccessible.includes(lastLibraryId))) {
-        this.$store.commit('libraries/setCurrentLibrary', lastLibraryId)
-      } else if (userDefaultLibraryId) {
-        this.$store.commit('libraries/setCurrentLibrary', userDefaultLibraryId)
-      }
-
       this.$store.commit('user/setUser', user)
-      this.$store.commit('user/setAccessToken', serverConnectionConfig.token)
       this.$store.commit('user/setServerConnectionConfig', serverConnectionConfig)
 
       this.$socket.connect(this.serverConfig.address, this.serverConfig.token)
@@ -914,13 +865,7 @@ export default {
       this.error = null
       this.processing = true
 
-      const nativeHttpOptions = {
-        headers: {
-          Authorization: `Bearer ${this.serverConfig.token}`
-        },
-        serverConnectionConfig: this.serverConfig
-      }
-      const authRes = await this.$nativeHttp.post(`${this.serverConfig.address}/api/authorize`, null, nativeHttpOptions).catch((error) => {
+      const authRes = await this.postRequest(`${this.serverConfig.address}/api/authorize`, null, { Authorization: `Bearer ${this.serverConfig.token}` }).catch((error) => {
         console.error('[ServerConnectForm] Server auth failed', error)
         const errorMsg = error.message || error
         this.error = 'Failed to authorize'
@@ -929,39 +874,14 @@ export default {
         }
         return false
       })
+
       console.log('[ServerConnectForm] authRes=', authRes)
 
       this.processing = false
       return authRes
     },
-    async setForceRelogin(error) {
-      console.log('[ServerConnectForm] setForceRelogin', error, this.serverConfig.address)
-      // This calls /status on the server and sets the auth methods
-      const result = await this.submit(true)
-      if (result) {
-        this.showForm = true
-
-        if (error === 'oldAuthToken') {
-          this.error = this.$strings.MessageOldServerAuthReLoginRequired
-        } else if (error === 'refreshTokenFailed') {
-          this.error = this.$strings.MessageFailedToRefreshToken
-        }
-      }
-    },
     init() {
-      if (this.$route.query.serverConnectionConfigId) {
-        // Handle force re-login for servers using new JWT auth but still using an old token OR refresh token failed
-        this.serverConfig = this.serverConnectionConfigs.find((scc) => scc.id === this.$route.query.serverConnectionConfigId)
-        if (this.serverConfig) {
-          this.setForceRelogin(this.$route.query.error)
-          return
-        } else {
-          console.error('[ServerConnectForm] init with serverConnectionConfigId but no serverConfig found', this.$route.query.serverConnectionConfigId)
-        }
-      }
-
       if (this.lastServerConnectionConfig) {
-        console.log('[ServerConnectForm] init with lastServerConnectionConfig', this.lastServerConnectionConfig)
         this.connectToServer(this.lastServerConnectionConfig)
       } else {
         this.showForm = !this.serverConnectionConfigs.length

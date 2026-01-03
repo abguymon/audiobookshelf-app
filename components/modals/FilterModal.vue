@@ -54,39 +54,8 @@ export default {
   },
   data() {
     return {
-      sublist: null
-    }
-  },
-  watch: {
-    show(newVal) {
-      if (!newVal) {
-        if (this.sublist && !this.selectedItemSublist) this.sublist = null
-        if (!this.sublist && this.selectedItemSublist) this.sublist = this.selectedItemSublist
-      }
-    }
-  },
-  computed: {
-    show: {
-      get() {
-        return this.value
-      },
-      set(val) {
-        this.$emit('input', val)
-      }
-    },
-    selected: {
-      get() {
-        return this.filterBy
-      },
-      set(val) {
-        this.$emit('update:filterBy', val)
-      }
-    },
-    userCanAccessExplicitContent() {
-      return this.$store.getters['user/getUserCanAccessExplicitContent']
-    },
-    bookItems() {
-      const items = [
+      sublist: null,
+      bookItems: [
         {
           text: this.$strings.LabelAll,
           value: 'all'
@@ -135,26 +104,9 @@ export default {
           text: this.$strings.ButtonIssues,
           value: 'issues',
           sublist: false
-        },
-        {
-          text: this.$strings.LabelRSSFeedOpen,
-          value: 'feed-open',
-          sublist: false
         }
-      ]
-
-      if (this.userCanAccessExplicitContent) {
-        items.push({
-          text: this.$strings.LabelExplicit,
-          value: 'explicit',
-          sublist: false
-        })
-      }
-
-      return items
-    },
-    podcastItems() {
-      const items = [
+      ],
+      podcastItems: [
         {
           text: this.$strings.LabelAll,
           value: 'all'
@@ -168,23 +120,34 @@ export default {
           text: this.$strings.LabelTag,
           value: 'tags',
           sublist: true
-        },
-        {
-          text: this.$strings.LabelRSSFeedOpen,
-          value: 'feed-open',
-          sublist: false
         }
       ]
-
-      if (this.userCanAccessExplicitContent) {
-        items.push({
-          text: this.$strings.LabelExplicit,
-          value: 'explicit',
-          sublist: false
-        })
+    }
+  },
+  watch: {
+    show(newVal) {
+      if (!newVal) {
+        if (this.sublist && !this.selectedItemSublist) this.sublist = null
+        if (!this.sublist && this.selectedItemSublist) this.sublist = this.selectedItemSublist
       }
-
-      return items
+    }
+  },
+  computed: {
+    show: {
+      get() {
+        return this.value
+      },
+      set(val) {
+        this.$emit('input', val)
+      }
+    },
+    selected: {
+      get() {
+        return this.filterBy
+      },
+      set(val) {
+        this.$emit('update:filterBy', val)
+      }
     },
     isPodcast() {
       return this.$store.getters['libraries/getCurrentLibraryMediaType'] === 'podcast'

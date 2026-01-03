@@ -9,7 +9,7 @@ import Foundation
 import Alamofire
 
 class ApiClient {
-    private static let secureStorage = SecureStorage()
+    private static let logger = AppLogger(category: "ApiClient")
     
     public static func getData(from url: URL, completion: @escaping (UIImage?) -> Void) {
         URLSession.shared.dataTask(with: url, completionHandler: {(data, response, error) in
@@ -21,7 +21,7 @@ class ApiClient {
     
     public static func postResource<T: Decodable>(endpoint: String, parameters: [String: Any], decodable: T.Type = T.self, callback: ((_ param: T) -> Void)?) {
         if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
+            logger.error("Server config not set")
             return
         }
         
@@ -34,7 +34,7 @@ class ApiClient {
             case .success(let obj):
                 callback?(obj)
             case .failure(let error):
-                AbsLogger.error(message: "api request to \(endpoint) failed")
+                logger.error("api request to \(endpoint) failed")
                 print(error)
             }
         }
@@ -42,7 +42,7 @@ class ApiClient {
     
     public static func postResource<T: Encodable, U: Decodable>(endpoint: String, parameters: T, decodable: U.Type = U.self, callback: ((_ param: U) -> Void)?) {
         if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
+            logger.error("Server config not set")
             return
         }
         
@@ -55,7 +55,7 @@ class ApiClient {
             case .success(let obj):
                 callback?(obj)
             case .failure(let error):
-                AbsLogger.error(message: "api request to \(endpoint) failed")
+                logger.error("api request to \(endpoint) failed")
                 print(error)
             }
         }
@@ -71,7 +71,7 @@ class ApiClient {
     
     public static func postResource<T:Encodable>(endpoint: String, parameters: T, callback: ((_ success: Bool) -> Void)?) {
         if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
+            logger.error("Server config not set")
             callback?(false)
             return
         }
@@ -85,7 +85,7 @@ class ApiClient {
             case .success(_):
                 callback?(true)
             case .failure(let error):
-                AbsLogger.error(message: "api request to \(endpoint) failed")
+                logger.error("api request to \(endpoint) failed")
                 print(error)
                 
                 callback?(false)
@@ -95,7 +95,7 @@ class ApiClient {
     
     public static func patchResource<T: Encodable>(endpoint: String, parameters: T, callback: ((_ success: Bool) -> Void)?) {
         if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
+            logger.error("Server config not set")
             callback?(false)
             return
         }
@@ -109,7 +109,7 @@ class ApiClient {
             case .success(_):
                 callback?(true)
             case .failure(let error):
-                AbsLogger.error(message: "api request to \(endpoint) failed")
+                logger.error("api request to \(endpoint) failed")
                 print(error)
                 callback?(false)
             }
@@ -126,7 +126,7 @@ class ApiClient {
     
     public static func getResource<T: Decodable>(endpoint: String, decodable: T.Type = T.self, callback: ((_ param: T?) -> Void)?) {
         if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
+            logger.error("Server config not set")
             callback?(nil)
             return
         }
@@ -140,324 +140,12 @@ class ApiClient {
                 case .success(let obj):
                     callback?(obj)
                 case .failure(let error):
-                    AbsLogger.error(message: "api request to \(endpoint) failed")
+                    logger.error("api request to \(endpoint) failed")
                     print(error)
             }
         }
     }
     
-    // MARK: - Token Refresh Handling
-
-    /**
-     * Handles token refresh when a 401 Unauthorized response is received
-     * This function will:
-     * 1. Get the refresh token from secure storage for the current server connection
-     * 2. Make a request to /auth/refresh endpoint with the refresh token
-     * 3. Update the connection config with the new accessToken and put the refreshToken in secure storage
-     * 4. Retry the original request with the new access token
-     * 5. If refresh fails, handle logout
-     */
-    private static func handleTokenRefresh<T: Decodable>(originalRequest: DataRequest, endpoint: String, method: HTTPMethod, parameters: Any?, decodable: T.Type, callback: ((_ param: T?) -> Void)?) {
-        guard let serverConfig = Store.serverConfig else {
-            AbsLogger.error(message: "handleTokenRefresh: No server config available")
-            callback?(nil)
-            return
-        }
-
-        AbsLogger.info(message: "handleTokenRefresh: Attempting to refresh auth tokens for server \(serverConfig.name)")
-
-        // Get refresh token from secure storage
-        guard let refreshToken = secureStorage.getRefreshToken(serverConnectionConfigId: serverConfig.id) else {
-            AbsLogger.error(message: "handleTokenRefresh: No refresh token available for server \(serverConfig.name)")
-            handleRefreshFailure()
-            callback?(nil)
-            return
-        }
-
-        AbsLogger.info(message: "handleTokenRefresh: Retrieved refresh token, attempting to refresh access token")
-
-        // Create refresh token request
-        let refreshHeaders: HTTPHeaders = [
-            "x-refresh-token": refreshToken,
-            "Content-Type": "application/json"
-        ]
-
-        let refreshRequest = AF.request("\(serverConfig.address)/auth/refresh", method: .post, headers: refreshHeaders)
-
-        refreshRequest.responseDecodable(of: RefreshResponse.self) { response in
-            switch response.result {
-            case .success(let refreshResponse):
-                guard let user = refreshResponse.user,
-                      !user.accessToken.isEmpty else {
-                    AbsLogger.error(message: "handleTokenRefresh: No access token in refresh response for server \(serverConfig.name)")
-                    handleRefreshFailure()
-                    callback?(nil)
-                    return
-                }
-
-                AbsLogger.info(message: "handleTokenRefresh: Successfully obtained new access token")
-
-                // Update tokens in secure storage and store
-                updateTokens(newAccessToken: user.accessToken, newRefreshToken: user.refreshToken ?? refreshToken, serverConnectionConfigId: serverConfig.id)
-
-                // Retry the original request with the new access token
-                AbsLogger.info(message: "handleTokenRefresh: Retrying original request with new token")
-                retryOriginalRequest(endpoint: endpoint, method: method, parameters: parameters, decodable: decodable, newAccessToken: user.accessToken, callback: callback)
-
-            case .failure(let error):
-                AbsLogger.error(message: "handleTokenRefresh: Refresh request failed for server \(serverConfig.name): \(error)")
-                handleRefreshFailure()
-                callback?(nil)
-            }
-        }
-    }
-
-    /**
-     * Updates the stored tokens with new access and refresh tokens
-     */
-    private static func updateTokens(newAccessToken: String, newRefreshToken: String, serverConnectionConfigId: String) {
-        // Update the refresh token in secure storage if it's new
-        if newRefreshToken != secureStorage.getRefreshToken(serverConnectionConfigId: serverConnectionConfigId) {
-            let hasStored = secureStorage.storeRefreshToken(serverConnectionConfigId: serverConnectionConfigId, refreshToken: newRefreshToken)
-            AbsLogger.info(message: "updateTokens: Updated refresh token in secure storage. Stored=\(hasStored)")
-        }
-
-        // Update access token on server connection config
-        Database.shared.updateServerConnectionConfigToken(newToken: newAccessToken)
-        AbsLogger.info(message: "updateTokens: Updated access token in server connection config")
-
-        AbsLogger.info(message: "updateTokens: Successfully refreshed auth tokens for server \(Store.serverConfig?.name ?? "unknown")")
-
-        // Notify webview frontend about token refresh
-        if let callback = AbsDatabase.tokenRefreshCallback {
-            let tokenData: [String: Any] = ["accessToken": newAccessToken]
-            callback("onTokenRefresh", tokenData)
-        }
-    }
-
-    /**
-     * Retries the original request with the new access token
-     */
-    private static func retryOriginalRequest<T: Decodable>(endpoint: String, method: HTTPMethod, parameters: Any?, decodable: T.Type, newAccessToken: String, callback: ((_ param: T?) -> Void)?) {
-        guard let serverConfig = Store.serverConfig else {
-            AbsLogger.error(message: "retryOriginalRequest: No server config available")
-            callback?(nil)
-            return
-        }
-
-        let headers: HTTPHeaders = [
-            "Authorization": "Bearer \(newAccessToken)"
-        ]
-
-        let retryRequest: DataRequest
-
-        switch method {
-        case .get:
-            retryRequest = AF.request("\(serverConfig.address)/\(endpoint)", method: .get, headers: headers)
-        case .post:
-            if let parameters = parameters as? [String: Any] {
-                retryRequest = AF.request("\(serverConfig.address)/\(endpoint)", method: .post, parameters: parameters, encoding: JSONEncoding.default, headers: headers)
-            } else if let encodableParams = parameters as? Encodable {
-                retryRequest = AF.request("\(serverConfig.address)/\(endpoint)", method: .post, parameters: encodableParams, encoder: JSONParameterEncoder.default, headers: headers)
-            } else {
-                retryRequest = AF.request("\(serverConfig.address)/\(endpoint)", method: .post, headers: headers)
-            }
-        case .patch:
-            if let encodableParams = parameters as? Encodable {
-                retryRequest = AF.request("\(serverConfig.address)/\(endpoint)", method: .patch, parameters: encodableParams, encoder: JSONParameterEncoder.default, headers: headers)
-            } else {
-                retryRequest = AF.request("\(serverConfig.address)/\(endpoint)", method: .patch, headers: headers)
-            }
-        default:
-            AbsLogger.error(message: "retryOriginalRequest: Unsupported method \(method)")
-            callback?(nil)
-            return
-        }
-
-        // Handle the response
-        retryRequest.response { response in
-            if let statusCode = response.response?.statusCode, (200...299).contains(statusCode) {
-                // Check if response has data
-                if let data = response.data, !data.isEmpty {
-                    // If it is a string return nil (e.g. express returns OK for 200 status codes)
-                    if let responseString = String(data: data, encoding: .utf8) {
-                        AbsLogger.info(message: "retryOriginalRequest: Got string response '\(responseString)'")
-                        callback?(nil)
-                        return
-                    }
-
-                    // If not a string, try JSON
-                    do {
-                        let decodedObject = try JSONDecoder().decode(decodable, from: data)
-                        callback?(decodedObject)
-                    } catch {
-                        AbsLogger.error(message: "retryOriginalRequest: JSON decode failed: \(error)", error: error)
-                        callback?(nil)
-                    }
-                } else {
-                    // Empty response
-                    AbsLogger.info(message: "retryOriginalRequest: Empty response with success status \(statusCode)")
-                    callback?(nil)
-                }
-            } else {
-                AbsLogger.error(message: "retryOriginalRequest: Request failed with status \(response.response?.statusCode ?? 0)")
-                callback?(nil)
-            }
-        }
-    }
-
-    /**
-     * Handles the case when token refresh fails
-     * This will clear the current server connection and notify webview
-     */
-    private static func handleRefreshFailure() {
-        AbsLogger.info(message: "handleRefreshFailure: Token refresh failed, clearing session")
-
-        // Clear the current server connection
-        Store.serverConfig = nil
-
-        // Remove refresh token from secure storage
-        if let serverConfig = Store.serverConfig {
-            _ = secureStorage.removeRefreshToken(serverConnectionConfigId: serverConfig.id)
-        }
-
-        // Notify webview frontend about token refresh failure
-        if let callback = AbsDatabase.tokenRefreshCallback {
-            callback("onTokenRefreshFailure", ["error": "Token refresh failed"])
-        }
-    }
-
-    // MARK: - Enhanced API Methods with Token Refresh
-
-    public static func getResourceWithTokenRefresh<T: Decodable>(endpoint: String, decodable: T.Type = T.self, callback: ((_ param: T?) -> Void)?) {
-        if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
-            callback?(nil)
-            return
-        }
-
-        let headers: HTTPHeaders = [
-            "Authorization": "Bearer \(Store.serverConfig!.token)"
-        ]
-
-        let request = AF.request("\(Store.serverConfig!.address)/\(endpoint)", method: .get, headers: headers)
-
-        request.responseDecodable(of: decodable) { response in
-            if let statusCode = response.response?.statusCode, statusCode == 401 {
-                AbsLogger.info(message: "getResourceWithTokenRefresh: 401 Unauthorized for request to \(endpoint) - attempting token refresh")
-                handleTokenRefresh(originalRequest: request, endpoint: endpoint, method: .get, parameters: nil, decodable: decodable, callback: callback)
-            } else {
-                switch response.result {
-                case .success(let obj):
-                    callback?(obj)
-                case .failure(let error):
-                    AbsLogger.error(message: "api request to \(endpoint) failed")
-                    print(error)
-                    callback?(nil)
-                }
-            }
-        }
-    }
-
-    public static func postResourceWithTokenRefresh<T: Encodable, U: Decodable>(endpoint: String, parameters: T, decodable: U.Type = U.self, callback: ((_ param: U?) -> Void)?) {
-        if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
-            callback?(nil)
-            return
-        }
-
-        let headers: HTTPHeaders = [
-            "Authorization": "Bearer \(Store.serverConfig!.token)"
-        ]
-
-        let request = AF.request("\(Store.serverConfig!.address)/\(endpoint)", method: .post, parameters: parameters, encoder: JSONParameterEncoder.default, headers: headers)
-
-        request.responseDecodable(of: decodable) { response in
-            if let statusCode = response.response?.statusCode, statusCode == 401 {
-                AbsLogger.info(message: "postResourceWithTokenRefresh: 401 Unauthorized for request to \(endpoint) - attempting token refresh")
-                handleTokenRefresh(originalRequest: request, endpoint: endpoint, method: .post, parameters: parameters, decodable: decodable, callback: callback)
-            } else {
-                switch response.result {
-                case .success(let obj):
-                    callback?(obj)
-                case .failure(let error):
-                    AbsLogger.error(message: "api request to \(endpoint) failed")
-                    print(error)
-                    callback?(nil)
-                }
-            }
-        }
-    }
-
-    /**
-     * POST request for endpoints that only return success/failure
-     */
-    public static func postResourceWithTokenRefresh<T: Encodable>(endpoint: String, parameters: T, callback: ((_ success: Bool) -> Void)?) {
-        if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
-            callback?(false)
-            return
-        }
-
-        let headers: HTTPHeaders = [
-            "Authorization": "Bearer \(Store.serverConfig!.token)"
-        ]
-
-        let request = AF.request("\(Store.serverConfig!.address)/\(endpoint)", method: .post, parameters: parameters, encoder: JSONParameterEncoder.default, headers: headers)
-
-        request.response { response in
-            if let statusCode = response.response?.statusCode, statusCode == 401 {
-                AbsLogger.info(message: "postResourceWithTokenRefresh: 401 Unauthorized for request to \(endpoint) - attempting token refresh")
-                handleTokenRefresh(originalRequest: request, endpoint: endpoint, method: .post, parameters: parameters, decodable: EmptyResponse.self) { result in
-                    callback?(result != nil)
-                }
-            } else {
-                switch response.result {
-                case .success(_):
-                    callback?(true)
-                case .failure(let error):
-                    AbsLogger.error(message: "api request to \(endpoint) failed")
-                    print(error)
-                    callback?(false)
-                }
-            }
-        }
-    }
-
-    public static func patchResourceWithTokenRefresh<T: Encodable>(endpoint: String, parameters: T, callback: ((_ success: Bool) -> Void)?) {
-        if (Store.serverConfig == nil) {
-            AbsLogger.error(message: "Server config not set")
-            callback?(false)
-            return
-        }
-
-        let headers: HTTPHeaders = [
-            "Authorization": "Bearer \(Store.serverConfig!.token)"
-        ]
-
-        let request = AF.request("\(Store.serverConfig!.address)/\(endpoint)", method: .patch, parameters: parameters, encoder: JSONParameterEncoder.default, headers: headers)
-
-        request.response { response in
-            if let statusCode = response.response?.statusCode, statusCode == 401 {
-                AbsLogger.info(message: "patchResourceWithTokenRefresh: 401 Unauthorized for request to \(endpoint) - attempting token refresh")
-                handleTokenRefresh(originalRequest: request, endpoint: endpoint, method: .patch, parameters: parameters, decodable: EmptyResponse.self) { result in
-                    callback?(result != nil)
-                }
-            } else {
-                switch response.result {
-                case .success(_):
-                    callback?(true)
-                case .failure(let error):
-                    AbsLogger.error(message: "api request to \(endpoint) failed")
-                    print(error)
-                    callback?(false)
-                }
-            }
-        }
-    }
-
-    // MARK: - API Functions
-
     public static func startPlaybackSession(libraryItemId: String, episodeId: String?, forceTranscode:Bool, callback: @escaping (_ param: PlaybackSession) -> Void) {
         var endpoint = "api/items/\(libraryItemId)/play"
         if episodeId != nil {
@@ -472,28 +160,20 @@ class ApiClient {
             }
         }
         
-        // Create an Encodable struct for the parameters
-        let parameters = PlaybackSessionRequest(
-            forceDirectPlay: !forceTranscode ? "1" : "",
-            forceTranscode: forceTranscode ? "1" : "",
-            mediaPlayer: "AVPlayer",
-            deviceInfo: DeviceInfo(
-                deviceId: UIDevice.current.identifierForVendor?.uuidString,
-                manufacturer: "Apple",
-                model: modelCode,
-                clientVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-            )
-        )
-
-        // Use the new token refresh-enabled method
-        postResourceWithTokenRefresh(endpoint: endpoint, parameters: parameters, decodable: PlaybackSession.self) { session in
-            guard let session = session else {
-                AbsLogger.error(message: "startPlaybackSession: Failed to create playback session")
-                callback(PlaybackSession()) // Return empty session on failure
-                return
-            }
+        let parameters: [String: Any] = [
+            "forceDirectPlay": !forceTranscode ? "1" : "",
+            "forceTranscode": forceTranscode ? "1" : "",
+            "mediaPlayer": "AVPlayer",
+            "deviceInfo": [
+                "deviceId": UIDevice.current.identifierForVendor?.uuidString,
+                "manufacturer": "Apple",
+                "model": modelCode,
+                "clientVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            ]
+        ]
+        ApiClient.postResource(endpoint: endpoint, parameters: parameters, decodable: PlaybackSession.self) { obj in
+            let session = obj
             
-            // Set server connection info on the session
             session.serverConnectionConfigId = Store.serverConfig!.id
             session.serverAddress = Store.serverConfig!.address
             
@@ -502,28 +182,15 @@ class ApiClient {
     }
     
     public static func reportPlaybackProgress(report: PlaybackReport, sessionId: String) async -> Bool {
-        return await withCheckedContinuation { continuation in
-            postResourceWithTokenRefresh(endpoint: "api/session/\(sessionId)/sync", parameters: report) { success in
-                continuation.resume(returning: success)
-            }
-        }
+        return await postResource(endpoint: "api/session/\(sessionId)/sync", parameters: report)
     }
     
     public static func reportLocalPlaybackProgress(_ session: PlaybackSession) async -> Bool {
-        return await withCheckedContinuation { continuation in
-            postResourceWithTokenRefresh(endpoint: "api/session/local", parameters: session) { success in
-                continuation.resume(returning: success)
-            }
-        }
+        return await postResource(endpoint: "api/session/local", parameters: session)
     }
     
     public static func reportAllLocalPlaybackSessions(_ sessions: [PlaybackSession]) async -> Bool {
-        return await withCheckedContinuation { continuation in
-            let payload = LocalPlaybackSessionSyncAllPayload(sessions: sessions, deviceInfo: sessions.first?.deviceInfo)
-            postResourceWithTokenRefresh(endpoint: "api/session/local-all", parameters: payload) { success in
-                continuation.resume(returning: success)
-            }
-        }
+        return await postResource(endpoint: "api/session/local-all", parameters: LocalPlaybackSessionSyncAllPayload(sessions: sessions, deviceInfo: sessions.first?.deviceInfo))
     }
     
     public static func syncLocalSessionsWithServer(isFirstSync: Bool) async {
@@ -532,14 +199,14 @@ class ApiClient {
             let localMediaProgressList = Database.shared.getAllLocalMediaProgress().filter {
                 $0.serverConnectionConfigId == Store.serverConfig?.id
             }.map { $0.freeze() }
-            AbsLogger.info(message: "syncLocalSessionsWithServer: Found \(localMediaProgressList.count) local media progress for server")
+            logger.log("syncLocalSessionsWithServer: Found \(localMediaProgressList.count) local media progress for server")
             
             if (localMediaProgressList.isEmpty) {
-                AbsLogger.info(message: "syncLocalSessionsWithServer: No local progress to sync")
+                logger.log("syncLocalSessionsWithServer: No local progress to sync")
             } else {
                 let currentUser = await ApiClient.getCurrentUser()
                 guard let currentUser = currentUser else {
-                    AbsLogger.info(message: "syncLocalSessionsWithServer: No User")
+                    logger.log("syncLocalSessionsWithServer: No User")
                     return
                 }
                 try currentUser.mediaProgress.forEach { mediaProgress in
@@ -551,12 +218,12 @@ class ApiClient {
                         }
                     }
                     if (localMediaProgress != nil && mediaProgress.lastUpdate > localMediaProgress!.lastUpdate) {
-                        AbsLogger.info(message: "syncLocalSessionsWithServer: Updating local media progress \(localMediaProgress!.id) with server media progress")
+                        logger.log("syncLocalSessionsWithServer: Updating local media progress \(localMediaProgress!.id) with server media progress")
                         if let localMediaProgress = localMediaProgress?.thaw() {
                             try localMediaProgress.updateFromServerMediaProgress(mediaProgress)
                         }
                     } else if (localMediaProgress != nil) {
-                        AbsLogger.info(message: "syncLocalSessionsWithServer: Local progress for \(localMediaProgress!.id) is more recent then server progress")
+                        logger.log("syncLocalSessionsWithServer: Local progress for \(localMediaProgress!.id) is more recent then server progress")
                     }
                 }
             }
@@ -565,13 +232,13 @@ class ApiClient {
             let playbackSessions = Database.shared.getAllPlaybackSessions().filter {
                 $0.serverConnectionConfigId == Store.serverConfig?.id
             }.map { $0.freeze() }
-            AbsLogger.info(message: "syncLocalSessionsWithServer: Found \(playbackSessions.count) playback sessions for server (first sync: \(isFirstSync))")
+            logger.log("syncLocalSessionsWithServer: Found \(playbackSessions.count) playback sessions for server (first sync: \(isFirstSync))")
             if (!playbackSessions.isEmpty) {
                 let success = await ApiClient.reportAllLocalPlaybackSessions(playbackSessions)
                 if (success) {
                     // Remove sessions from db
                     try playbackSessions.forEach { session in
-                        AbsLogger.info(message: "syncLocalSessionsWithServer: Handling \(session.displayTitle ?? "") (\(session.id)) \(session.isActiveSession)")
+                        logger.log("syncLocalSessionsWithServer: Handling \(session.displayTitle ?? "") (\(session.id)) \(session.isActiveSession)")
                         // On first sync then remove all sessions
                         if (!session.isActiveSession || isFirstSync) {
                             if let session = session.thaw() {
@@ -588,39 +255,31 @@ class ApiClient {
     }
     
     public static func updateMediaProgress<T:Encodable>(libraryItemId: String, episodeId: String?, payload: T, callback: @escaping () -> Void) {
-        AbsLogger.info(message: "updateMediaProgress \(libraryItemId) \(episodeId ?? "NIL") \(payload)")
+        logger.log("updateMediaProgress \(libraryItemId) \(episodeId ?? "NIL") \(payload)")
         let endpoint = episodeId?.isEmpty ?? true ? "api/me/progress/\(libraryItemId)" : "api/me/progress/\(libraryItemId)/\(episodeId ?? "")"
-        patchResourceWithTokenRefresh(endpoint: endpoint, parameters: payload) { _ in
+        patchResource(endpoint: endpoint, parameters: payload) { success in
             callback()
         }
     }
     
     public static func getMediaProgress(libraryItemId: String, episodeId: String?) async -> MediaProgress? {
-        AbsLogger.info(message: "getMediaProgress \(libraryItemId) \(episodeId ?? "NIL")")
+        logger.log("getMediaProgress \(libraryItemId) \(episodeId ?? "NIL")")
         let endpoint = episodeId?.isEmpty ?? true ? "api/me/progress/\(libraryItemId)" : "api/me/progress/\(libraryItemId)/\(episodeId ?? "")"
-        return await withCheckedContinuation { continuation in
-            getResourceWithTokenRefresh(endpoint: endpoint, decodable: MediaProgress.self) { result in
-                continuation.resume(returning: result)
-            }
-        }
+        return await getResource(endpoint: endpoint, decodable: MediaProgress.self)
     }
     
     public static func getCurrentUser() async -> User? {
-        AbsLogger.info(message: "getCurrentUser")
-        return await withCheckedContinuation { continuation in
-            getResourceWithTokenRefresh(endpoint: "api/me", decodable: User.self) { result in
-                continuation.resume(returning: result)
-            }
-        }
+        logger.log("getCurrentUser")
+        return await getResource(endpoint: "api/me", decodable: User.self)
     }
     
-    public static func getLibraryItemWithProgress(libraryItemId: String, episodeId: String?, callback: @escaping (_ param: LibraryItem?) -> Void) {
+    public static func getLibraryItemWithProgress(libraryItemId:String, episodeId:String?, callback: @escaping (_ param: LibraryItem?) -> Void) {
         var endpoint = "api/items/\(libraryItemId)?expanded=1&include=progress"
         if episodeId != nil {
             endpoint += "&episodeId=\(episodeId!)"
         }
 
-        getResourceWithTokenRefresh(endpoint: endpoint, decodable: LibraryItem.self) { obj in
+        ApiClient.getResource(endpoint: endpoint, decodable: LibraryItem.self) { obj in
             callback(obj)
         }
     }
@@ -678,31 +337,4 @@ struct Connectivity {
   static var isConnectedToInternet:Bool {
       return self.sharedInstance.isReachable
     }
-}
-
-// MARK: - Response Models
-
-struct RefreshResponse: Decodable {
-    let user: RefreshUser?
-}
-
-struct RefreshUser: Decodable {
-    let accessToken: String
-    let refreshToken: String?
-}
-
-struct EmptyResponse: Decodable {}
-
-struct PlaybackSessionRequest: Encodable {
-    let forceDirectPlay: String
-    let forceTranscode: String
-    let mediaPlayer: String
-    let deviceInfo: DeviceInfo
-}
-
-struct DeviceInfo: Encodable {
-    let deviceId: String?
-    let manufacturer: String
-    let model: String?
-    let clientVersion: String?
 }

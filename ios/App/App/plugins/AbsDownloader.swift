@@ -19,6 +19,8 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
     
     static private let downloadsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     
+    private let logger = AppLogger(category: "AbsDownloader")
+
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: "AbsDownloader")
         let queue = OperationQueue()
@@ -102,7 +104,7 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
     private func handleDownloadTaskUpdate(downloadTask: URLSessionTask, progressHandler: DownloadProgressHandler) {
         do {
             guard let downloadItemPartId = downloadTask.taskDescription else { throw LibraryItemDownloadError.noTaskDescription }
-            AbsLogger.info(message: "Received download update for \(downloadItemPartId)")
+            logger.log("Received download update for \(downloadItemPartId)")
             
             // Find the download item
             let downloadItem = Database.shared.getDownloadItem(downloadItemPartId: downloadItemPartId)
@@ -117,7 +119,7 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
                 try progressHandler(downloadItem, part)
                 try? self.notifyListeners("onDownloadItemPartUpdate", data: part.asDictionary())
             } catch {
-                AbsLogger.error(message: "Error while processing progress")
+                logger.error("Error while processing progress")
                 debugPrint(error)
             }
             
@@ -128,7 +130,7 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
             }
             self.notifyDownloadProgress()
         } catch {
-            AbsLogger.error(message: "DownloadItemError")
+            logger.error("DownloadItemError")
             debugPrint(error)
         }
     }
@@ -136,18 +138,18 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
     // We want to handle updating the UI in the background and throttled so we don't overload the UI with progress updates
     private func notifyDownloadProgress() {
         if self.monitoringProgressTimer?.isValid ?? false {
-            AbsLogger.info(message: "Already monitoring progress, no need to start timer again")
+            logger.log("Already monitoring progress, no need to start timer again")
         } else {
             DispatchQueue.runOnMainQueue {
                 self.monitoringProgressTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true, block: { [unowned self] t in
-                    AbsLogger.info(message: "Starting monitoring download progress...")
+                    self.logger.log("Starting monitoring download progress...")
                     
                     // Fetch active downloads in a thread-safe way
                     func fetchActiveDownloads() -> [String: DownloadItem]? {
                         self.progressStatusQueue.sync {
                             let activeDownloads = self.downloadItemProgress
                             if activeDownloads.isEmpty {
-                                AbsLogger.info(message: "Finishing monitoring download progress...")
+                                logger.log("Finishing monitoring download progress...")
                                 t.invalidate()
                             }
                             return activeDownloads
@@ -182,7 +184,7 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
         
         if ( downloadItem.didDownloadSuccessfully() ) {
             ApiClient.getLibraryItemWithProgress(libraryItemId: downloadItem.libraryItemId!, episodeId: downloadItem.episodeId) { [weak self] libraryItem in
-                guard let libraryItem = libraryItem else { AbsLogger.error(message: "LibraryItem not found"); return }
+                guard let libraryItem = libraryItem else { self?.logger.error("LibraryItem not found"); return }
                 let localDirectory = libraryItem.id
                 var coverFile: String?
                 
@@ -229,12 +231,12 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
         var episodeId = call.getString("episodeId")
         if ( episodeId == "null" ) { episodeId = nil }
         
-        AbsLogger.info(message: "Download library item \(libraryItemId ?? "N/A") / episode \(episodeId ?? "N/A")")
+        logger.log("Download library item \(libraryItemId ?? "N/A") / episode \(episodeId ?? "N/A")")
         guard let libraryItemId = libraryItemId else { return call.resolve(["error": "libraryItemId not specified"]) }
         
         ApiClient.getLibraryItemWithProgress(libraryItemId: libraryItemId, episodeId: episodeId) { [weak self] libraryItem in
             if let libraryItem = libraryItem {
-                AbsLogger.info(message: "Got library item from server \(libraryItem.id)")
+                self?.logger.log("Got library item from server \(libraryItem.id)")
                 do {
                     if let episodeId = episodeId {
                         // Download a podcast episode
@@ -315,7 +317,7 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
     }
     
     private func startLibraryItemTrackDownload(downloadItemId: String, item: LibraryItem, position: Int, track: AudioTrack, episode: PodcastEpisode?) throws -> DownloadItemPartTask {
-        AbsLogger.info(message: "TRACK \(track.contentUrl!)")
+        logger.log("TRACK \(track.contentUrl!)")
         
         // If we don't name metadata, then we can't proceed
         guard let filename = track.metadata?.filename else {
@@ -391,10 +393,10 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
     
     private func createLibraryItemFileDirectory(item: LibraryItem) throws -> String {
         let itemDirectory = item.id
-        AbsLogger.info(message: "ITEM DIR \(itemDirectory)")
+        logger.log("ITEM DIR \(itemDirectory)")
         
         guard AbsDownloader.itemDownloadFolder(path: itemDirectory) != nil else {
-            AbsLogger.error(message: "Failed to CREATE LI DIRECTORY \(itemDirectory)")
+            logger.error("Failed to CREATE LI DIRECTORY \(itemDirectory)")
             throw LibraryItemDownloadError.failedDirectory
         }
         
@@ -416,7 +418,7 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
             
             return itemFolder
         } catch {
-            AbsLogger.error(message: "Failed to CREATE LI DIRECTORY \(error)", error: error)
+            AppLogger().error("Failed to CREATE LI DIRECTORY \(error)")
             return nil
         }
     }

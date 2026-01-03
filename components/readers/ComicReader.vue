@@ -77,6 +77,9 @@ export default {
     }
   },
   computed: {
+    userToken() {
+      return this.$store.getters['user/getToken']
+    },
     libraryItemId() {
       return this.libraryItem?.id
     },
@@ -242,9 +245,11 @@ export default {
     async extract() {
       this.loading = true
 
-      // TODO: Handle JWT auth refresh
       const buff = await this.$axios.$get(this.url, {
-        responseType: 'blob'
+        responseType: 'blob',
+        headers: {
+          Authorization: `Bearer ${this.userToken}`
+        }
       })
 
       const archive = await Archive.open(buff)

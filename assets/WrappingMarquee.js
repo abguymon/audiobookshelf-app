@@ -39,11 +39,11 @@ class WrappingMarquee {
     this.setMask(true)
 
     let textScrollAmount = this.el.scrollWidth
-    this.pEl.textContent = this.innerText + '\u00A0'.repeat(15) // \u00A0 = non-breaking space
+    this.pEl.innerHTML = this.innerText + '&nbsp;'.repeat(15)
     let totalScrollAmount = this.el.scrollWidth
     let scrollDuration = totalScrollAmount * this.#scrollSpeed
 
-    this.pEl.textContent = this.pEl.textContent + this.innerText
+    this.pEl.innerHTML = this.pEl.innerHTML + this.innerText
 
     let done = false
     let start, previousTimeStamp
@@ -55,14 +55,13 @@ class WrappingMarquee {
       const elapsed = timeStamp - start
 
       if (this.isScrolling && previousTimeStamp !== timeStamp) {
-        const amountToMove = Math.min((elapsed / scrollDuration) * totalScrollAmount, totalScrollAmount)
+        const amountToMove = Math.min(elapsed / scrollDuration * totalScrollAmount, totalScrollAmount)
         this.pEl.style.transform = `translateX(-${amountToMove}px)`
         if (amountToMove === totalScrollAmount) done = true
         if (amountToMove > textScrollAmount) this.setMask(false)
       }
 
-      if (!this.isScrolling || done) {
-        // canceled or done
+      if (!this.isScrolling || done) { // canceled or done
         this.isScrolling = false
         this.pEl.style.transform = 'translateX(0px)'
         this.pEl.innerText = this.innerText
@@ -70,8 +69,7 @@ class WrappingMarquee {
         if (done) {
           this.startTimer()
         }
-      } else if (elapsed < scrollDuration) {
-        // step
+      } else if (elapsed < scrollDuration) { // step
         previousTimeStamp = timeStamp
         this.animationId = window.requestAnimationFrame(step)
       }

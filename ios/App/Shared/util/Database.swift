@@ -13,13 +13,9 @@ class Database {
         return Database()
     }()
 
-    private init() {
-      do {
-        try cleanExpiredLogs()
-      } catch {
-          debugPrint(error)
-      }
-    }
+    private let logger = AppLogger(category: "Database")
+
+    private init() {}
     
     public func setServerConnectionConfig(config: ServerConnectionConfig) {
         let config = config
@@ -31,13 +27,12 @@ class Database {
                 try existing.update {
                     existing.name = config.name
                     existing.address = config.address
-                    existing.version = config.version
                     existing.userId = config.userId
                     existing.username = config.username
                     existing.token = config.token
                 }
             } catch {
-                AbsLogger.error("setServerConn", message: "failed to update server config")
+                logger.error("failed to update server config")
                 debugPrint(error)
             }
             
@@ -58,24 +53,11 @@ class Database {
                     realm.add(config)
                 }
             } catch(let exception) {
-                AbsLogger.error(message: "failed to save server config")
+                logger.error("failed to save server config")
                 debugPrint(exception)
             }
             
             setLastActiveConfigIndex(index: config.index)
-        }
-    }
-
-    public func updateServerConnectionConfigToken(newToken: String) {
-        do {
-            let realm = try Realm()
-            if let config = realm.objects(ServerConnectionConfig.self).first(where: { $0.index == getLastActiveConfigIndex() }) {
-                try realm.write {
-                    config.token = newToken
-                }
-            }
-        } catch {
-            debugPrint("Failed to update server connection config token: \(error)")
         }
     }
     
@@ -90,7 +72,7 @@ class Database {
                 }
             }
         } catch(let exception) {
-            AbsLogger.error(message: "failed to delete server config")
+            logger.error("failed to delete server config")
             debugPrint(exception)
         }
     }
@@ -121,7 +103,7 @@ class Database {
                 }
             }
         } catch(let exception) {
-            AbsLogger.error(message: "failed to save server config active index")
+            logger.error("failed to save server config active index")
             debugPrint(exception)
         }
     }
@@ -141,7 +123,7 @@ class Database {
                 realm.add(deviceSettings)
             }
         } catch {
-            AbsLogger.error(message: "failed to save device settings")
+            logger.error("failed to save device settings")
         }
     }
     
@@ -277,56 +259,6 @@ class Database {
         } catch {
             debugPrint(error)
             return nil
-        }
-    }
-
-    public func saveLog(_ log: LogEntry) throws {
-        let realm = try Realm()
-        return try realm.write { realm.add(log) }
-    }
-
-    public func getAllLogs() -> [LogEntry] {
-        do {
-            let realm = try Realm()
-            return realm.objects(LogEntry.self).toArray()
-        } catch {
-            debugPrint(error)
-            return []
-        }
-    }
-
-    public func clearLogs() throws {
-        do {
-            let realm = try! Realm()
-            try realm.write {
-                realm.objects(LogEntry.self).forEach { log in
-                    realm.delete(log)
-                }
-            }
-        } catch {
-            AbsLogger.error(message: "\(error)", error: error)
-            throw error
-        }
-    }
-
-    private func cleanExpiredLogs() throws {
-        let realm = try Realm()
-        let numberOfHoursToKeep = 48
-        let keepLogCutoff = Date().addingTimeInterval(TimeInterval(-1 * numberOfHoursToKeep * 3600))
-
-        let allLogs = getAllLogs()
-        var logsRemoved = 0
-        try? realm.write {
-            allLogs.forEach { log in
-                if log.timestamp < Int(keepLogCutoff.timeIntervalSince1970) {
-                    realm.delete(log)
-                    logsRemoved += 1
-                }
-            }
-        }
-
-        if logsRemoved > 0 {
-            AbsLogger.info(message: "cleanLogs: Removed \(logsRemoved) logs older than \(numberOfHoursToKeep) hours")
         }
     }
 }

@@ -37,7 +37,6 @@ export default {
       isRefreshingUI: false,
       ereaderSettings: {
         theme: 'dark',
-        font: 'serif',
         fontScale: 100,
         lineSpacing: 115,
         textStroke: 0
@@ -50,6 +49,9 @@ export default {
     }
   },
   computed: {
+    userToken() {
+      return this.$store.getters['user/getToken']
+    },
     /** @returns {string} */
     libraryItemId() {
       return this.libraryItem?.id
@@ -135,7 +137,6 @@ export default {
 
       const fontScale = settings.fontScale || 100
       this.rendition.themes.fontSize(`${fontScale}%`)
-      this.rendition.themes.font(settings.font)
       this.rendition.spread(settings.spread || 'auto')
     },
     goToChapter(href) {
@@ -297,26 +298,15 @@ export default {
 
       /** @type {EpubReader} */
       const reader = this
-
-      // Use axios to make request because we have token refresh logic in interceptor
-      const customRequest = async (url) => {
-        try {
-          return this.$axios.$get(url, {
-            responseType: 'arraybuffer'
-          })
-        } catch (error) {
-          console.error('EpubReader.initEpub customRequest failed:', error)
-          throw error
-        }
-      }
-
       console.log('[EpubReader] initEpub', reader.url)
       /** @type {ePub.Book} */
       reader.book = new ePub(reader.url, {
         width: window.innerWidth,
         height: window.innerHeight - this.readerHeightOffset,
         openAs: 'epub',
-        requestMethod: this.isLocal ? null : customRequest
+        requestHeaders: {
+          Authorization: `Bearer ${this.userToken}`
+        }
       })
 
       /** @type {ePub.Rendition} */

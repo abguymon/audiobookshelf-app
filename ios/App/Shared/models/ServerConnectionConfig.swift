@@ -13,7 +13,6 @@ class ServerConnectionConfig: Object {
     @Persisted(indexed: true) var index: Int = 1
     @Persisted var name: String = ""
     @Persisted var address: String = ""
-    @Persisted var version: String = ""
     @Persisted var userId: String = ""
     @Persisted var username: String = ""
     @Persisted var token: String = ""
@@ -30,7 +29,6 @@ func convertServerConnectionConfigToJSON(config: ServerConnectionConfig) -> Dict
         "name": config.name,
         "index": config.index,
         "address": config.address,
-        "version": config.version,
         "userId": config.userId,
         "username": config.username,
         "token": config.token,

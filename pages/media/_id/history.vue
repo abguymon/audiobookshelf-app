@@ -200,7 +200,7 @@ export default {
     this.onMediaItemHistoryUpdatedListener = await AbsAudioPlayer.addListener('onMediaItemHistoryUpdated', this.onMediaItemHistoryUpdated)
   },
   beforeDestroy() {
-    this.onMediaItemHistoryUpdatedListener?.remove()
+    if (this.onMediaItemHistoryUpdatedListener) this.onMediaItemHistoryUpdatedListener.remove()
   }
 }
 </script>

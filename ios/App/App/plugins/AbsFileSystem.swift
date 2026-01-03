@@ -23,10 +23,12 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "deleteTrackFromItem", returnType: CAPPluginReturnPromise)
     ]
     
+    private let logger = AppLogger(category: "AbsFileSystem")
+
     @objc func selectFolder(_ call: CAPPluginCall) {
         let mediaType = call.getString("mediaType")
 
-        AbsLogger.info(message: "Select Folder for media type \(mediaType ?? "UNSET")")
+        logger.log("Select Folder for media type \(mediaType ?? "UNSET")")
         
         call.unavailable("Not available on iOS")
     }
@@ -34,7 +36,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
     @objc func checkFolderPermission(_ call: CAPPluginCall) {
         let folderUrl = call.getString("folderUrl")
 
-        AbsLogger.info(message: "checkFolderPermission for folder \(folderUrl ?? "UNSET")")
+        logger.log("checkFolderPermission for folder \(folderUrl ?? "UNSET")")
         
         call.unavailable("Not available on iOS")
     }
@@ -43,7 +45,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
         let folderId = call.getString("folderId")
         let forceAudioProbe = call.getBool("forceAudioProbe", false)
 
-        AbsLogger.info(message: "scanFolder \(folderId ?? "UNSET") | Force Probe = \(forceAudioProbe)")
+        logger.log("scanFolder \(folderId ?? "UNSET") | Force Probe = \(forceAudioProbe)")
         
         call.unavailable("Not available on iOS")
     }
@@ -51,7 +53,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
     @objc func removeFolder(_ call: CAPPluginCall) {
         let folderId = call.getString("folderId")
 
-        AbsLogger.info(message: "removeFolder \(folderId ?? "UNSET")")
+        logger.log("removeFolder \(folderId ?? "UNSET")")
         
         call.unavailable("Not available on iOS")
     }
@@ -59,7 +61,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
     @objc func removeLocalLibraryItem(_ call: CAPPluginCall) {
         let localLibraryItemId = call.getString("localLibraryItemId")
 
-        AbsLogger.info(message: "removeLocalLibraryItem \(localLibraryItemId ?? "UNSET")")
+        logger.log("removeLocalLibraryItem \(localLibraryItemId ?? "UNSET")")
         
         call.unavailable("Not available on iOS")
     }
@@ -68,7 +70,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
         let localLibraryItemId = call.getString("localLibraryItemId")
         let forceAudioProbe = call.getBool("forceAudioProbe", false)
 
-        AbsLogger.info(message: "scanLocalLibraryItem \(localLibraryItemId ?? "UNSET") | Force Probe = \(forceAudioProbe)")
+        logger.log("scanLocalLibraryItem \(localLibraryItemId ?? "UNSET") | Force Probe = \(forceAudioProbe)")
         
         call.unavailable("Not available on iOS")
     }
@@ -77,7 +79,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
         let localLibraryItemId = call.getString("id")
         let contentUrl = call.getString("contentUrl")
         
-        AbsLogger.info(message: "deleteItem \(localLibraryItemId ?? "UNSET") url \(contentUrl ?? "UNSET")")
+        logger.log("deleteItem \(localLibraryItemId ?? "UNSET") url \(contentUrl ?? "UNSET")")
         
         var success = false
         do {
@@ -87,7 +89,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
                 success = true
             }
         } catch {
-            AbsLogger.error(message: "Failed to delete \(error)")
+            logger.error("Failed to delete \(error)")
             success = false
         }
         
@@ -98,7 +100,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
         let localLibraryItemId = call.getString("id")
         let trackLocalFileId = call.getString("trackLocalFileId")
 
-        AbsLogger.info(message: "deleteTrackFromItem \(localLibraryItemId ?? "UNSET") track file \(trackLocalFileId ?? "UNSET")")
+        logger.log("deleteTrackFromItem \(localLibraryItemId ?? "UNSET") track file \(trackLocalFileId ?? "UNSET")")
         
         var success = false
         if let localLibraryItemId = localLibraryItemId, let trackLocalFileId = trackLocalFileId, let item = Database.shared.getLocalLibraryItem(localLibraryItemId: localLibraryItemId) {
@@ -118,12 +120,12 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
                             success = true
                         }
                     } catch {
-                        AbsLogger.error(message: "Failed to delete \(error)")
+                        logger.error("Failed to delete \(error)")
                         success = false
                     }
                 }
             } catch {
-                AbsLogger.error(message: "Failed to delete \(error)")
+                logger.error("Failed to delete \(error)")
                 success = false
             }
         }

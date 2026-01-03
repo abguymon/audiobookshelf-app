@@ -8,7 +8,6 @@ import com.audiobookshelf.app.data.*
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.media.MediaEventManager
 import com.audiobookshelf.app.server.ApiHandler
-import com.audiobookshelf.app.managers.SecureStorage
 import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -23,21 +22,17 @@ class AbsDatabase : Plugin() {
   val tag = "AbsDatabase"
   private var jacksonMapper = jacksonObjectMapper().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature())
 
-  private lateinit var mainActivity: MainActivity
-  private lateinit var apiHandler: ApiHandler
-  private lateinit var secureStorage: SecureStorage
+  lateinit var mainActivity: MainActivity
+  lateinit var apiHandler: ApiHandler
 
   data class LocalMediaProgressPayload(val value:List<LocalMediaProgress>)
   data class LocalLibraryItemsPayload(val value:List<LocalLibraryItem>)
   data class LocalFoldersPayload(val value:List<LocalFolder>)
-  data class ServerConnConfigPayload(val id:String?, val index:Int, val name:String?, val userId:String, val username:String, var version:String, val token:String, val refreshToken:String?, val address:String?, val customHeaders:Map<String,String>?)
+  data class ServerConnConfigPayload(val id:String?, val index:Int, val name:String?, val userId:String, val username:String, val token:String, val address:String?, val customHeaders:Map<String,String>?)
 
   override fun load() {
     mainActivity = (activity as MainActivity)
     apiHandler = ApiHandler(mainActivity)
-    ApiHandler.absDatabaseNotifyListeners = ::notifyListeners
-
-    secureStorage = SecureStorage(mainActivity)
 
     DeviceManager.dbManager.cleanLocalMediaProgress()
     DeviceManager.dbManager.cleanLocalLibraryItems()
@@ -125,9 +120,7 @@ class AbsDatabase : Plugin() {
 
     val userId =  serverConfigPayload.userId
     val username = serverConfigPayload.username
-    val serverVersion = serverConfigPayload.version
-    val accessToken = serverConfigPayload.token
-    val refreshToken = serverConfigPayload.refreshToken // Refresh only sent after login or refresh
+    val token = serverConfigPayload.token
 
     GlobalScope.launch(Dispatchers.IO) {
       if (serverConnectionConfig == null) { // New Server Connection
@@ -136,16 +129,7 @@ class AbsDatabase : Plugin() {
         // Create new server connection config
         val sscId = DeviceManager.getBase64Id("$serverAddress@$username")
         val sscIndex = DeviceManager.deviceData.serverConnectionConfigs.size
-
-        // Store refresh token securely if provided
-        val hasRefreshToken = if (!refreshToken.isNullOrEmpty()) {
-          secureStorage.storeRefreshToken(sscId, refreshToken)
-        } else {
-          false
-        }
-        Log.d(tag, "Refresh token secured = $hasRefreshToken")
-
-        serverConnectionConfig = ServerConnectionConfig(sscId, sscIndex, "$serverAddress ($username)", serverAddress, serverVersion, userId, username, accessToken, serverConfigPayload.customHeaders)
+        serverConnectionConfig = ServerConnectionConfig(sscId, sscIndex, "$serverAddress ($username)", serverAddress, userId, username, token, serverConfigPayload.customHeaders)
 
         // Add and save
         DeviceManager.deviceData.serverConnectionConfigs.add(serverConnectionConfig!!)
@@ -153,19 +137,12 @@ class AbsDatabase : Plugin() {
         DeviceManager.dbManager.saveDeviceData(DeviceManager.deviceData)
       } else {
         var shouldSave = false
-        if (serverConnectionConfig?.username != username || serverConnectionConfig?.token != accessToken || serverConnectionConfig?.version != serverVersion) {
+        if (serverConnectionConfig?.username != username || serverConnectionConfig?.token != token) {
           serverConnectionConfig?.userId = userId
           serverConnectionConfig?.username = username
           serverConnectionConfig?.name = "${serverConnectionConfig?.address} (${serverConnectionConfig?.username})"
-          serverConnectionConfig?.version = serverVersion
-          serverConnectionConfig?.token = accessToken
+          serverConnectionConfig?.token = token
           shouldSave = true
-        }
-
-        // Update refresh token if provided
-        if (!refreshToken.isNullOrEmpty()) {
-          val stored = secureStorage.storeRefreshToken(serverConnectionConfig!!.id, refreshToken)
-          Log.d(tag, "Refresh token secured = $stored")
         }
 
         // Set last connection config
@@ -186,10 +163,6 @@ class AbsDatabase : Plugin() {
   fun removeServerConnectionConfig(call:PluginCall) {
     GlobalScope.launch(Dispatchers.IO) {
       val serverConnectionConfigId = call.getString("serverConnectionConfigId", "").toString()
-
-      // Remove refresh token if it exists
-      secureStorage.removeRefreshToken(serverConnectionConfigId)
-
       DeviceManager.deviceData.serverConnectionConfigs = DeviceManager.deviceData.serverConnectionConfigs.filter { it.id != serverConnectionConfigId } as MutableList<ServerConnectionConfig>
       if (DeviceManager.deviceData.lastServerConnectionConfigId == serverConnectionConfigId) {
         DeviceManager.deviceData.lastServerConnectionConfigId = null
@@ -200,42 +173,6 @@ class AbsDatabase : Plugin() {
       }
       call.resolve()
     }
-  }
-
-  @PluginMethod
-  fun getRefreshToken(call:PluginCall) {
-    val serverConnectionConfigId = call.getString("serverConnectionConfigId", "").toString()
-
-    GlobalScope.launch(Dispatchers.IO) {
-      val refreshToken = secureStorage.getRefreshToken(serverConnectionConfigId)
-      if (refreshToken != null) {
-        val result = JSObject()
-        result.put("refreshToken", refreshToken)
-        call.resolve(result)
-      } else {
-        call.resolve()
-      }
-    }
-  }
-
-  @PluginMethod
-  fun clearRefreshToken(call:PluginCall) {
-    val serverConnectionConfigId = call.getString("serverConnectionConfigId", "").toString()
-
-    val refreshToken = secureStorage.removeRefreshToken(serverConnectionConfigId)
-    val result = JSObject()
-    result.put("success", refreshToken)
-    call.resolve(result)
-  }
-
-  @PluginMethod
-  fun getAccessToken(call:PluginCall) {
-    val serverConnectionConfigId = call.getString("serverConnectionConfigId", "").toString()
-    val serverConnectionConfig = DeviceManager.deviceData.serverConnectionConfigs.find { it.id == serverConnectionConfigId }
-    val token = serverConnectionConfig?.token ?: ""
-    val ret = JSObject()
-    ret.put("token", token)
-    call.resolve(ret)
   }
 
   @PluginMethod
