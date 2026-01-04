@@ -17,42 +17,23 @@
             <p class="text-xl font-mono">{{ this.$secondsToTimestamp(currentTime / _playbackRate) }}</p>
           </div>
 
-          <ui-text-input-with-label v-model="newBookmarkTitle" :placeholder="bookmarkPlaceholder()" :autofocus="false" ref="noteInput" label="Note" />
+          <ui-text-input-with-label v-model="newBookmarkTitle" :placeholder="bookmarkPlaceholder()" :autofocus="true" ref="noteInput" label="Note" />
           <div class="flex justify-end mt-6">
             <ui-btn color="success" class="w-full" @click.stop="submitBookmark">{{ selectedBookmark ? 'Update' : 'Create' }}</ui-btn>
           </div>
         </div>
         <div class="w-full h-full" v-else>
-          <!-- Multi-Select Header -->
-          <div v-if="isMultiSelectMode" class="flex items-center justify-between mb-2 px-2 py-2 bg-bg bg-opacity-50 rounded-md">
-            <div class="flex items-center">
-              <span class="material-symbols text-2xl cursor-pointer mr-2" @click.stop="exitMultiSelectMode">close</span>
-              <p class="text-lg">{{ selectedBookmarks.length }} Selected</p>
-            </div>
-            <div class="flex items-center">
-              <span class="material-symbols text-2xl text-fg hover:text-error cursor-pointer" @click.stop="deleteSelectedBookmarks">delete</span>
-            </div>
+          <div v-if="bookmarks.length" class="flex justify-end px-2 pt-2">
+            <ui-btn small color="error" @click="deleteAllBookmarks">Clear All</ui-btn>
           </div>
-
           <template v-for="bookmark in bookmarks">
-            <modals-bookmarks-bookmark-item
-              :key="bookmark.time"
-              :highlight="currentTime === bookmark.time"
-              :bookmark="bookmark"
-              :playback-rate="_playbackRate"
-              :selected="selectedBookmarkIds.has(bookmark.time)"
-              :multi-select-mode="isMultiSelectMode"
-              @click="clickBookmark"
-              @edit="editBookmark"
-              @delete="deleteBookmark"
-              @longpress="handleLongPress"
-            />
+            <modals-bookmarks-bookmark-item :key="bookmark.id" :highlight="currentTime === bookmark.time" :bookmark="bookmark" :playback-rate="_playbackRate" @click="clickBookmark" @edit="editBookmark" @delete="deleteBookmark" />
           </template>
           <div v-if="!bookmarks.length" class="flex h-32 items-center justify-center">
             <p class="text-xl">{{ $strings.MessageNoBookmarks }}</p>
           </div>
         </div>
-        <div v-if="canCreateBookmark && !showBookmarkTitleInput && !isMultiSelectMode" class="flex px-4 py-2 items-center text-center justify-between border-b border-fg/10 bg-success cursor-pointer text-white text-opacity-80 sticky bottom-0 left-0 w-full" @click.stop="createBookmark">
+        <div v-if="canCreateBookmark && !showBookmarkTitleInput" class="flex px-4 py-2 items-center text-center justify-between border-b border-fg/10 bg-success cursor-pointer text-white text-opacity-80 sticky bottom-0 left-0 w-full" @click.stop="createBookmark">
           <span class="material-symbols">add</span>
           <p class="text-base pl-2">{{ $strings.ButtonCreateBookmark }}</p>
           <p class="text-sm font-mono">{{ this.$secondsToTimestamp(currentTime / _playbackRate) }}</p>
@@ -86,9 +67,7 @@ export default {
     return {
       selectedBookmark: null,
       showBookmarkTitleInput: false,
-      newBookmarkTitle: '',
-      isMultiSelectMode: false,
-      selectedBookmarks: [] // Array of bookmark times (unique IDs)
+      newBookmarkTitle: ''
     }
   },
   watch: {
@@ -96,7 +75,6 @@ export default {
       if (newVal) {
         this.showBookmarkTitleInput = false
         this.newBookmarkTitle = ''
-        this.exitMultiSelectMode()
       }
     }
   },
@@ -115,9 +93,6 @@ export default {
     _playbackRate() {
       if (!this.playbackRate || isNaN(this.playbackRate)) return 1
       return this.playbackRate
-    },
-    selectedBookmarkIds() {
-      return new Set(this.selectedBookmarks)
     }
   },
   methods: {
@@ -125,70 +100,10 @@ export default {
       // using a method prevents caching the date
       return this.$formatDate(Date.now(), 'MMM dd, yyyy HH:mm')
     },
-    async handleLongPress(bm) {
-      await this.$hapticsImpact()
-      if (!this.isMultiSelectMode) {
-        this.isMultiSelectMode = true
-        this.selectedBookmarks = [bm.time]
-      } else {
-        // Already in multi-select, toggle
-        this.toggleSelection(bm)
-      }
-    },
-    exitMultiSelectMode() {
-      this.isMultiSelectMode = false
-      this.selectedBookmarks = []
-    },
-    toggleSelection(bm) {
-      const index = this.selectedBookmarks.indexOf(bm.time)
-      if (index === -1) {
-        this.selectedBookmarks.push(bm.time)
-      } else {
-        this.selectedBookmarks.splice(index, 1)
-        if (this.selectedBookmarks.length === 0) {
-          this.exitMultiSelectMode()
-        }
-      }
-    },
     editBookmark(bm) {
-      if (this.isMultiSelectMode) return
       this.selectedBookmark = bm
       this.newBookmarkTitle = bm.title
       this.showBookmarkTitleInput = true
-    },
-    async deleteSelectedBookmarks() {
-      if (!this.selectedBookmarks.length) return
-      await this.$hapticsImpact()
-
-      const { value } = await Dialog.confirm({
-        title: 'Remove Bookmarks',
-        message: `Are you sure you want to remove ${this.selectedBookmarks.length} bookmarks?`
-      })
-      if (!value) return
-
-      // Since the API seems to be single delete, we iterate.
-      // Ideally we should have a bulk delete endpoint.
-      // We will perform deletions in parallel.
-      const promises = this.selectedBookmarks.map(time => {
-        return this.$nativeHttp
-          .delete(`/api/me/item/${this.libraryItemId}/bookmark/${time}`)
-          .then(() => {
-             this.$store.commit('user/deleteBookmark', { libraryItemId: this.libraryItemId, time: time })
-          })
-          .catch(err => {
-            console.error('Failed to delete bookmark', time, err)
-            // We continue even if one fails
-          })
-      })
-
-      try {
-        await Promise.all(promises)
-        this.$toast.success('Bookmarks removed')
-      } catch (error) {
-        this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
-      } finally {
-        this.exitMultiSelectMode()
-      }
     },
     async deleteBookmark(bm) {
       await this.$hapticsImpact()
@@ -208,13 +123,35 @@ export default {
           console.error(error)
         })
     },
-    async clickBookmark(bm) {
-      if (this.isMultiSelectMode) {
-        this.toggleSelection(bm)
-      } else {
-        await this.$hapticsImpact()
-        this.$emit('select', bm)
+    async deleteAllBookmarks() {
+      await this.$hapticsImpact()
+      const { value } = await Dialog.confirm({
+        title: 'Remove All Bookmarks',
+        message: 'Are you sure you want to remove all bookmarks?'
+      })
+      if (!value) return
+
+      const promises = this.bookmarks.map(bm => {
+        return this.$nativeHttp
+          .delete(`/api/me/item/${this.libraryItemId}/bookmark/${bm.time}`)
+          .then(() => {
+             this.$store.commit('user/deleteBookmark', { libraryItemId: this.libraryItemId, time: bm.time })
+          })
+          .catch(err => {
+            console.error('Failed to delete bookmark', bm.time, err)
+          })
+      })
+
+      try {
+        await Promise.all(promises)
+        this.$toast.success('All bookmarks removed')
+      } catch (error) {
+        this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
       }
+    },
+    async clickBookmark(bm) {
+      await this.$hapticsImpact()
+      this.$emit('select', bm)
     },
     submitUpdateBookmark(updatedBookmark) {
       this.$nativeHttp
@@ -253,7 +190,7 @@ export default {
     },
     createBookmark() {
       this.selectedBookmark = null
-      this.newBookmarkTitle = ''
+      this.newBookmarkTitle = this.$formatDate(Date.now(), 'MMM dd, yyyy HH:mm')
       this.showBookmarkTitleInput = true
     },
     async submitBookmark() {
