@@ -20,7 +20,7 @@ public class AbsDownloader: CAPPlugin, CAPBridgedPlugin, URLSessionDownloadDeleg
     static private let downloadsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     
     private let logger = AppLogger(category: "AbsDownloader")
-    
+
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: "AbsDownloader")
         let queue = OperationQueue()

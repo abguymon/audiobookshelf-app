@@ -15,7 +15,7 @@ class PlayerProgress {
     private static var TIME_BETWEEN_SESSION_SYNC_IN_SECONDS = 15.0
     
     private let logger = AppLogger(category: "PlayerProgress")
-    
+
     private init() {}
     
     

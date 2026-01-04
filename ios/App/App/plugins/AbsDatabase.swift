@@ -47,7 +47,7 @@ public class AbsDatabase: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "updateDeviceSettings", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "updateLocalEbookProgress", returnType: CAPPluginReturnPromise)
     ]
-    
+
     private let logger = AppLogger(category: "AbsDatabase")
 
     @objc func setCurrentServerConnectionConfig(_ call: CAPPluginCall) {

@@ -17,12 +17,15 @@
             <p class="text-xl font-mono">{{ this.$secondsToTimestamp(currentTime / _playbackRate) }}</p>
           </div>
 
-          <ui-text-input-with-label v-model="newBookmarkTitle" ref="noteInput" label="Note" />
+          <ui-text-input-with-label v-model="newBookmarkTitle" :placeholder="bookmarkPlaceholder()" :autofocus="true" ref="noteInput" label="Note" />
           <div class="flex justify-end mt-6">
             <ui-btn color="success" class="w-full" @click.stop="submitBookmark">{{ selectedBookmark ? 'Update' : 'Create' }}</ui-btn>
           </div>
         </div>
         <div class="w-full h-full" v-else>
+          <div v-if="bookmarks.length" class="flex justify-end px-2 pt-2">
+            <ui-btn small color="error" @click="deleteAllBookmarks">Clear All</ui-btn>
+          </div>
           <template v-for="bookmark in bookmarks">
             <modals-bookmarks-bookmark-item :key="bookmark.id" :highlight="currentTime === bookmark.time" :bookmark="bookmark" :playback-rate="_playbackRate" @click="clickBookmark" @edit="editBookmark" @delete="deleteBookmark" />
           </template>
@@ -93,6 +96,10 @@ export default {
     }
   },
   methods: {
+    bookmarkPlaceholder() {
+      // using a method prevents caching the date
+      return this.$formatDate(Date.now(), 'MMM dd, yyyy HH:mm')
+    },
     editBookmark(bm) {
       this.selectedBookmark = bm
       this.newBookmarkTitle = bm.title
@@ -115,6 +122,32 @@ export default {
           this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
           console.error(error)
         })
+    },
+    async deleteAllBookmarks() {
+      await this.$hapticsImpact()
+      const { value } = await Dialog.confirm({
+        title: 'Remove All Bookmarks',
+        message: 'Are you sure you want to remove all bookmarks?'
+      })
+      if (!value) return
+
+      const promises = this.bookmarks.map(bm => {
+        return this.$nativeHttp
+          .delete(`/api/me/item/${this.libraryItemId}/bookmark/${bm.time}`)
+          .then(() => {
+             this.$store.commit('user/deleteBookmark', { libraryItemId: this.libraryItemId, time: bm.time })
+          })
+          .catch(err => {
+            console.error('Failed to delete bookmark', bm.time, err)
+          })
+      })
+
+      try {
+        await Promise.all(promises)
+        this.$toast.success('All bookmarks removed')
+      } catch (error) {
+        this.$toast.error(this.$strings.ToastBookmarkRemoveFailed)
+      }
     },
     async clickBookmark(bm) {
       await this.$hapticsImpact()
@@ -159,16 +192,6 @@ export default {
       this.selectedBookmark = null
       this.newBookmarkTitle = this.$formatDate(Date.now(), 'MMM dd, yyyy HH:mm')
       this.showBookmarkTitleInput = true
-
-      // Auto focus the input and select the text
-      this.$nextTick(() => {
-        if (this.$refs.noteInput?.$refs.input?.$refs.input) {
-          this.$refs.noteInput.$refs.input.$refs.input.focus()
-          setTimeout(() => {
-            this.$refs.noteInput?.$refs.input?.$refs.input?.select()
-          }, 10)
-        }
-      })
     },
     async submitBookmark() {
       await this.$hapticsImpact()

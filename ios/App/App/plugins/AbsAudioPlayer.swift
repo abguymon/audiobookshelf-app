@@ -33,7 +33,7 @@ public class AbsAudioPlayer: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getSleepTimerTime", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setSleepTimer", returnType: CAPPluginReturnPromise)
     ]
-    
+
     private let logger = AppLogger(category: "AbsAudioPlayer")
 
     private var initialPlayWhenReady = false

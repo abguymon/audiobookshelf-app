@@ -3,7 +3,7 @@ class WrappingMarquee {
   #scrollSpeed = 30
 
   /**
-   * @param {HTMLElement} el 
+   * @param {HTMLElement} el
    */
   constructor(el) {
     this.el = el
@@ -21,8 +21,8 @@ class WrappingMarquee {
 
   /**
    * Transparent gradient mask shown when text is scrolling left and overflowing right
-   * 
-   * @param {boolean} showLeft 
+   *
+   * @param {boolean} showLeft
    */
   setMask(showLeft) {
     if (!this.el) return
@@ -94,8 +94,8 @@ class WrappingMarquee {
   /**
    * Initialize and start marquee if text overflows container
    * resets the marquee if already active
-   * 
-   * @param {string} innerText 
+   *
+   * @param {string} innerText
    */
   init(innerText) {
     if (!this.el || !this.pEl) return

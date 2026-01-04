@@ -24,7 +24,7 @@ public class AbsFileSystem: CAPPlugin, CAPBridgedPlugin {
     ]
     
     private let logger = AppLogger(category: "AbsFileSystem")
-    
+
     @objc func selectFolder(_ call: CAPPluginCall) {
         let mediaType = call.getString("mediaType")
 

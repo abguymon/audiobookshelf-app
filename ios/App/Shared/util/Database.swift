@@ -12,7 +12,7 @@ class Database {
     public static var shared = {
         return Database()
     }()
-    
+
     private let logger = AppLogger(category: "Database")
 
     private init() {}

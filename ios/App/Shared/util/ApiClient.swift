@@ -278,7 +278,7 @@ class ApiClient {
         if episodeId != nil {
             endpoint += "&episodeId=\(episodeId!)"
         }
-        
+
         ApiClient.getResource(endpoint: endpoint, decodable: LibraryItem.self) { obj in
             callback(obj)
         }
