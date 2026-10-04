@@ -23,32 +23,28 @@
           </div>
         </div>
         <div class="w-full h-full" v-else>
-          <!-- Multi-select toolbar -->
-          <div v-if="selectMode" class="flex items-center justify-between px-4 py-2 bg-secondary border-b border-fg/10">
-            <div class="flex items-center">
-              <div class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-10 cursor-pointer" @click.stop="exitSelectMode">
-                <span class="material-symbols text-2xl">close</span>
-              </div>
-              <p class="text-sm pl-2">{{ selectedBookmarks.length }} {{ $strings.LabelSelected }}</p>
-            </div>
-            <div class="flex items-center">
-              <div class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-10 cursor-pointer mr-1" @click.stop="toggleSelectAll">
-                <span class="material-symbols text-2xl" :class="allSelected ? 'text-success fill' : 'text-fg-muted'">{{ allSelected ? 'check_circle' : 'select_all' }}</span>
-              </div>
-              <div v-if="selectedBookmarks.length > 0" class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-10 cursor-pointer" @click.stop="deleteSelectedBookmarks">
-                <span class="material-symbols text-2xl text-error">delete</span>
-              </div>
-            </div>
-          </div>
-
-          <template v-for="bookmark in bookmarks">
+          <template v-for="bookmark in visibleBookmarks">
             <modals-bookmarks-bookmark-item :key="bookmark.id" :highlight="currentTime === bookmark.time" :bookmark="bookmark" :playback-rate="_playbackRate" :select-mode="selectMode" :selected="isBookmarkSelected(bookmark)" @click="clickBookmark" @edit="editBookmark" @delete="deleteBookmark" @toggle-select="toggleBookmarkSelect" @long-press="onBookmarkLongPress" />
           </template>
-          <div v-if="!bookmarks.length" class="flex h-32 items-center justify-center">
+          <div v-if="!visibleBookmarks.length" class="flex h-32 items-center justify-center">
             <p class="text-xl">{{ $strings.MessageNoBookmarks }}</p>
           </div>
         </div>
-        <div v-if="canCreateBookmark && !showBookmarkTitleInput && !selectMode" class="flex px-4 py-2 items-center text-center justify-between border-b border-fg/10 bg-success cursor-pointer text-white text-opacity-80 sticky bottom-0 left-0 w-full" @click.stop="createBookmark">
+        <!-- Multi-select bar takes the place of the create bookmark bar so the list does not shift -->
+        <div v-if="selectMode && !showBookmarkTitleInput" class="flex px-2 py-1 items-center justify-between border-b border-fg/10 bg-secondary sticky bottom-0 left-0 w-full" @click.stop>
+          <div class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-10 cursor-pointer" @click.stop="exitSelectMode">
+            <span class="material-symbols text-2xl">close</span>
+          </div>
+          <p class="text-base pl-2">{{ selectedBookmarks.length }} {{ $strings.LabelSelected }}</p>
+          <div class="flex-grow" />
+          <div class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-10 cursor-pointer mr-2" @click.stop="toggleSelectAll">
+            <span class="material-symbols text-2xl" :class="allSelected ? 'text-success fill' : 'text-fg-muted'">{{ allSelected ? 'check_circle' : 'select_all' }}</span>
+          </div>
+          <div class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white hover:bg-opacity-10 cursor-pointer" @click.stop="deleteSelectedBookmarks">
+            <span class="material-symbols text-2xl text-error">delete</span>
+          </div>
+        </div>
+        <div v-else-if="canCreateBookmark && !showBookmarkTitleInput" class="flex px-4 py-2 items-center text-center justify-between border-b border-fg/10 bg-success cursor-pointer text-white text-opacity-80 sticky bottom-0 left-0 w-full" @click.stop="createBookmark">
           <span class="material-symbols">add</span>
           <p class="text-base pl-2">{{ $strings.ButtonCreateBookmark }}</p>
           <p class="text-sm font-mono">{{ this.$secondsToTimestamp(currentTime / _playbackRate) }}</p>
@@ -84,7 +80,8 @@ export default {
       showBookmarkTitleInput: false,
       newBookmarkTitle: '',
       selectMode: false,
-      selectedBookmarks: []
+      selectedBookmarks: [],
+      pendingDeleteTimes: []
     }
   },
   watch: {
@@ -112,8 +109,12 @@ export default {
       if (!this.playbackRate || isNaN(this.playbackRate)) return 1
       return this.playbackRate
     },
+    visibleBookmarks() {
+      if (!this.pendingDeleteTimes.length) return this.bookmarks
+      return this.bookmarks.filter((bm) => !this.pendingDeleteTimes.includes(bm.time))
+    },
     allSelected() {
-      return this.bookmarks.length > 0 && this.selectedBookmarks.length === this.bookmarks.length
+      return this.visibleBookmarks.length > 0 && this.selectedBookmarks.length === this.visibleBookmarks.length
     }
   },
   methods: {
@@ -220,7 +221,7 @@ export default {
         this.selectedBookmarks = []
         this.selectMode = false
       } else {
-        this.selectedBookmarks = [...this.bookmarks]
+        this.selectedBookmarks = [...this.visibleBookmarks]
       }
     },
     async onBookmarkLongPress(bookmark) {
@@ -244,8 +245,12 @@ export default {
       if (!value) return
 
       const bookmarksToDelete = [...this.selectedBookmarks]
-      let failCount = 0
+      // Hide all selected bookmarks at once instead of letting them disappear one at a time
+      this.pendingDeleteTimes = bookmarksToDelete.map((bm) => bm.time)
+      this.exitSelectMode()
 
+      // Deleted sequentially because the server rewrites the full bookmarks list on each delete
+      let failCount = 0
       for (const bm of bookmarksToDelete) {
         try {
           await this.$nativeHttp.delete(`/api/me/item/${this.libraryItemId}/bookmark/${bm.time}`)
@@ -255,14 +260,13 @@ export default {
           console.error('Failed to delete bookmark', error)
         }
       }
+      this.pendingDeleteTimes = []
 
       if (failCount > 0) {
         this.$toast.error(this.$getString('ToastBookmarkRemoveSelectedFailed', [failCount]))
       } else {
         this.$toast.success(this.$getString('ToastBookmarkRemoveSelectedSuccess', [count]))
       }
-
-      this.exitSelectMode()
     }
   },
   mounted() {}
